@@ -1,0 +1,8 @@
+{
+  "name": "@blueshift-gg/quasar-svm-darwin-x64",
+  "version": "0.1.0",
+  "os": ["darwin"],
+  "cpu": ["x64"],
+  "description": "quasar-svm native binary for macOS x64",
+  "files": ["libquasar_svm.dylib"]
+}

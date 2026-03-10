@@ -1,0 +1,8 @@
+{
+  "name": "@blueshift-gg/quasar-svm-win32-x64-msvc",
+  "version": "0.1.0",
+  "os": ["win32"],
+  "cpu": ["x64"],
+  "description": "quasar-svm native binary for Windows x64",
+  "files": ["quasar_svm.dll"]
+}

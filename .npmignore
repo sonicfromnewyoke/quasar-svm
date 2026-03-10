@@ -1,0 +1,17 @@
+src/
+target/
+build.rs
+cbindgen.toml
+Cargo.toml
+Cargo.lock
+include/
+Makefile
+npm/
+bindings/
+libquasar_svm*
+quasar_svm.dll
+.claude/
+.github/
+.gitignore
+tsconfig.json
+.npmrc

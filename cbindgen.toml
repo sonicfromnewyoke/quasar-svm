@@ -1,0 +1,13 @@
+language = "C"
+include_guard = "QUASAR_SVM_H"
+tab_width = 4
+style = "both"
+cpp_compat = true
+
+sys_includes = ["stdint.h", "stdbool.h", "stddef.h"]
+
+[parse]
+parse_deps = false
+
+[enum]
+rename_variants = "ScreamingSnakeCase"

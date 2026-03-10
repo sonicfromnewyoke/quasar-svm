@@ -1,0 +1,14 @@
+/target
+/dist
+/node_modules
+bindings/java
+bindings/go
+bindings/python
+bindings/ruby
+bindings/swift
+bindings/swift/.build
+npm/*/libquasar_svm.*
+npm/*/quasar_svm.*
+libquasar_svm*
+quasar_svm.dll
+.npmrc

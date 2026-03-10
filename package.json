@@ -1,0 +1,52 @@
+{
+  "name": "@blueshift-gg/quasar-svm",
+  "version": "0.1.0",
+  "description": "Node.js bindings for quasar-svm (Solana SVM execution engine)",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" },
+    "./ffi": { "types": "./dist/ffi.d.ts", "default": "./dist/ffi.js" },
+    "./web3.js": { "types": "./dist/web3js/index.d.ts", "default": "./dist/web3js/index.js" },
+    "./kit": { "types": "./dist/kit/index.d.ts", "default": "./dist/kit/index.js" }
+  },
+  "scripts": {
+    "build": "tsc",
+    "build:native": "cargo build --release && cp target/release/libquasar_svm.* . 2>/dev/null; cp target/release/quasar_svm.dll . 2>/dev/null; true",
+    "prepare": "tsc",
+    "prepublishOnly": "npm run build"
+  },
+  "dependencies": {
+    "koffi": "^2.9.0"
+  },
+  "optionalDependencies": {
+    "@blueshift-gg/quasar-svm-darwin-arm64": "0.1.0",
+    "@blueshift-gg/quasar-svm-darwin-x64": "0.1.0",
+    "@blueshift-gg/quasar-svm-linux-arm64-gnu": "0.1.0",
+    "@blueshift-gg/quasar-svm-linux-x64-gnu": "0.1.0",
+    "@blueshift-gg/quasar-svm-win32-x64-msvc": "0.1.0"
+  },
+  "peerDependencies": {
+    "@solana/web3.js": ">=2.0.0",
+    "@solana/addresses": "^5.5.0",
+    "@solana/instructions": "^5.5.0",
+    "@solana/rpc-types": "^6.2.0"
+  },
+  "peerDependenciesMeta": {
+    "@solana/web3.js": { "optional": true },
+    "@solana/addresses": { "optional": true },
+    "@solana/instructions": { "optional": true },
+    "@solana/rpc-types": { "optional": true }
+  },
+  "devDependencies": {
+    "@solana/web3.js": "github:blueshift-gg/web3.js#v2",
+    "@solana/addresses": "^5.5.0",
+    "@solana/instructions": "^5.5.0",
+    "@solana/rpc-types": "^6.2.0",
+    "@types/node": "^22.0.0",
+    "typescript": "^5.7.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

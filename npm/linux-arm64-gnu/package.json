@@ -1,0 +1,8 @@
+{
+  "name": "@blueshift-gg/quasar-svm-linux-arm64-gnu",
+  "version": "0.1.0",
+  "os": ["linux"],
+  "cpu": ["arm64"],
+  "description": "quasar-svm native binary for Linux arm64",
+  "files": ["libquasar_svm.so"]
+}
