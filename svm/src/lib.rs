@@ -2,6 +2,7 @@ mod error;
 mod program_cache;
 mod svm;
 mod sysvars;
+pub mod token;
 
 pub use solana_account::Account;
 pub use solana_clock::Clock;

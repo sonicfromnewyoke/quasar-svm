@@ -16,10 +16,14 @@ import {
   LOADER_V3,
   loadElf,
 } from "../programs.js";
+import { packMint, packTokenAccount, rentMinimumBalance, MINT_LEN, TOKEN_ACCOUNT_LEN } from "../token.js";
+import type { TokenAccountState } from "../token.js";
 
 export type { Web3ExecutionResult } from "./types.js";
 export type { ExecutionResult, ExecutionStatus, ProgramError, Clock, EpochSchedule } from "../index.js";
 export { SPL_TOKEN_PROGRAM_ID, SPL_TOKEN_2022_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID, LOADER_V2, LOADER_V3 } from "../programs.js";
+export { TokenAccountState } from "../token.js";
+export type { MintData, TokenAccountData } from "../token.js";
 
 export class QuasarSvm {
   private ptr: unknown;
@@ -68,6 +72,74 @@ export class QuasarSvm {
 
   addSystemProgram(): this {
     return this;
+  }
+
+  /** Store a pre-initialized SPL Token mint account. */
+  addMintAccount(
+    pubkey: PublicKey,
+    opts: {
+      mintAuthority?: PublicKey;
+      supply?: bigint;
+      decimals?: number;
+      freezeAuthority?: PublicKey;
+    }
+  ): void {
+    const data = packMint({
+      mintAuthority: opts.mintAuthority?.toBuffer(),
+      supply: opts.supply,
+      decimals: opts.decimals,
+      freezeAuthority: opts.freezeAuthority?.toBuffer(),
+    });
+    const tokenProgramId = new PublicKey(SPL_TOKEN_PROGRAM_ID);
+    this.check(
+      ffi.quasar_svm_set_account(
+        this.ptr,
+        pubkey.toBuffer(),
+        tokenProgramId.toBuffer(),
+        rentMinimumBalance(MINT_LEN),
+        data,
+        MINT_LEN,
+        false
+      )
+    );
+  }
+
+  /** Store a pre-initialized SPL Token token account. */
+  addTokenAccount(
+    pubkey: PublicKey,
+    opts: {
+      mint: PublicKey;
+      owner: PublicKey;
+      amount: bigint;
+      delegate?: PublicKey;
+      state?: TokenAccountState;
+      isNative?: bigint;
+      delegatedAmount?: bigint;
+      closeAuthority?: PublicKey;
+    }
+  ): void {
+    const data = packTokenAccount({
+      mint: opts.mint.toBuffer(),
+      owner: opts.owner.toBuffer(),
+      amount: opts.amount,
+      delegate: opts.delegate?.toBuffer(),
+      state: opts.state,
+      isNative: opts.isNative,
+      delegatedAmount: opts.delegatedAmount,
+      closeAuthority: opts.closeAuthority?.toBuffer(),
+    });
+    const tokenProgramId = new PublicKey(SPL_TOKEN_PROGRAM_ID);
+    this.check(
+      ffi.quasar_svm_set_account(
+        this.ptr,
+        pubkey.toBuffer(),
+        tokenProgramId.toBuffer(),
+        rentMinimumBalance(TOKEN_ACCOUNT_LEN),
+        data,
+        TOKEN_ACCOUNT_LEN,
+        false
+      )
+    );
   }
 
   /** Store an account in the SVM's persistent account database. */
