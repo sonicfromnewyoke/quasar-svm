@@ -4,11 +4,14 @@ mod sysvars;
 
 pub use solana_account::Account;
 pub use solana_clock::Clock;
-pub use solana_instruction::Instruction;
+pub use solana_instruction::{AccountMeta, Instruction};
 pub use solana_instruction_error::InstructionError;
 pub use solana_pubkey::Pubkey;
 pub use solana_rent::Rent;
 pub use solana_sdk_ids;
+
+/// Convenience alias so users can write `quasar_svm::system_program::ID`.
+pub use solana_sdk_ids::system_program;
 
 pub use crate::program_cache::loader_keys;
 pub use crate::svm::{ExecutionResult, QuasarSvm};
