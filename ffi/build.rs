@@ -11,5 +11,5 @@ fn main() {
         .with_sys_include("stddef.h")
         .generate()
         .expect("Unable to generate C bindings")
-        .write_to_file(format!("{}/include/quasar_svm.h", crate_dir));
+        .write_to_file(format!("{}/../include/quasar_svm.h", crate_dir));
 }

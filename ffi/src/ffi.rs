@@ -3,9 +3,9 @@ use std::panic::AssertUnwindSafe;
 use std::slice;
 
 use crate::error::*;
-use crate::program_cache::loader_keys;
-use crate::svm::QuasarSvm;
 use crate::wire;
+use quasar_svm::QuasarSvm;
+use quasar_svm::loader_keys;
 
 // ---------------------------------------------------------------------------
 // Error query
@@ -318,7 +318,7 @@ pub extern "C" fn quasar_result_free(result: *mut u8, result_len: u64) {
 fn write_result_out(
     result_out: *mut *mut u8,
     result_len_out: *mut u64,
-    exec_result: &crate::svm::ExecutionResult,
+    exec_result: &quasar_svm::ExecutionResult,
     logs: Vec<String>,
 ) {
     let serialized = wire::serialize_result(exec_result, logs);

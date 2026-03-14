@@ -4,7 +4,9 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use agave_feature_set::FeatureSet;
-use agave_syscalls::{create_program_runtime_environment_v1, create_program_runtime_environment_v2};
+use agave_syscalls::{
+    create_program_runtime_environment_v1, create_program_runtime_environment_v2,
+};
 use solana_account::{Account, AccountSharedData, ReadableAccount, WritableAccount};
 use solana_compute_budget::compute_budget::ComputeBudget;
 use solana_hash::Hash;
@@ -24,7 +26,6 @@ use solana_transaction_context::{IndexOfAccount, TransactionContext};
 
 use crate::program_cache::ProgramCache;
 use crate::sysvars::Sysvars;
-
 
 struct NoOpCallback;
 
@@ -62,6 +63,12 @@ pub struct QuasarSvm {
     pub logger: Option<Rc<RefCell<LogCollector>>>,
     pub program_cache: ProgramCache,
     pub sysvars: Sysvars,
+}
+
+impl Default for QuasarSvm {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl QuasarSvm {
@@ -137,8 +144,7 @@ impl QuasarSvm {
         let sanitized_message =
             SanitizedMessage::Legacy(LegacyMessage::new(message, &HashSet::new()));
 
-        let program_ids: HashSet<Pubkey> =
-            instructions.iter().map(|ix| ix.program_id).collect();
+        let program_ids: HashSet<Pubkey> = instructions.iter().map(|ix| ix.program_id).collect();
         let account_keys: HashSet<&Pubkey> = accounts.iter().map(|(k, _)| k).collect();
 
         // Build fallback accounts for programs and sysvars not in the provided list.
@@ -204,8 +210,7 @@ impl QuasarSvm {
                 transaction_context
                     .find_index_of_account(pubkey)
                     .map(|index| {
-                        let account_ref =
-                            transaction_context.accounts().try_borrow(index).unwrap();
+                        let account_ref = transaction_context.accounts().try_borrow(index).unwrap();
                         let resulting_account = Account {
                             lamports: account_ref.lamports(),
                             data: account_ref.data().to_vec(),
@@ -270,9 +275,7 @@ impl QuasarSvm {
 
         let mut raw_result: Result<(), InstructionError> = Ok(());
 
-        for (_instruction_index, (_program_id, compiled_ix)) in
-            sanitized_message.program_instructions_iter().enumerate()
-        {
+        for (_program_id, compiled_ix) in sanitized_message.program_instructions_iter() {
             let program_id_index = compiled_ix.program_id_index as IndexOfAccount;
 
             invoke_context
@@ -285,8 +288,8 @@ impl QuasarSvm {
                 .expect("failed to prepare instruction");
 
             let mut compute_units_consumed_ix = 0u64;
-            let invoke_result = invoke_context
-                .process_instruction(&mut compute_units_consumed_ix, &mut timings);
+            let invoke_result =
+                invoke_context.process_instruction(&mut compute_units_consumed_ix, &mut timings);
 
             compute_units_consumed += compute_units_consumed_ix;
 

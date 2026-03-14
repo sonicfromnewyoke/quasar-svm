@@ -94,10 +94,9 @@ impl ProgramCache {
 
     fn replenish(&self, program_id: Pubkey, entry: Arc<ProgramCacheEntry>, elf: Option<Arc<[u8]>>) {
         let loader_key = entry.account_owner();
-        self.entries.borrow_mut().insert(
-            program_id,
-            CacheEntry { loader_key, elf },
-        );
+        self.entries
+            .borrow_mut()
+            .insert(program_id, CacheEntry { loader_key, elf });
         self.cache.borrow_mut().replenish(program_id, entry);
     }
 
@@ -167,10 +166,8 @@ impl ProgramCache {
                 },
             )],
             loader_keys::LOADER_V3 => {
-                let (programdata_address, _) = Pubkey::find_program_address(
-                    &[pubkey.as_ref()],
-                    &loader_keys::LOADER_V3,
-                );
+                let (programdata_address, _) =
+                    Pubkey::find_program_address(&[pubkey.as_ref()], &loader_keys::LOADER_V3);
 
                 // Program account
                 let program_data = bincode::serialize(&UpgradeableLoaderState::Program {
@@ -186,12 +183,10 @@ impl ProgramCache {
                 };
 
                 // Programdata account
-                let programdata_header = bincode::serialize(
-                    &UpgradeableLoaderState::ProgramData {
-                        slot: 0,
-                        upgrade_authority_address: None,
-                    },
-                )
+                let programdata_header = bincode::serialize(&UpgradeableLoaderState::ProgramData {
+                    slot: 0,
+                    upgrade_authority_address: None,
+                })
                 .unwrap();
                 let mut programdata_bytes = programdata_header;
                 if let Some(elf) = &entry.elf {
