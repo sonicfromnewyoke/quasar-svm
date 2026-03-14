@@ -7,16 +7,16 @@ RUST_TARGETS := aarch64-apple-darwin x86_64-apple-darwin x86_64-unknown-linux-gn
 .PHONY: build build-all clean copy-binary prepublish publish publish-platform version
 
 build:
-	cargo build --release
+	cargo build --release -p quasar-svm-ffi
 	npx tsc
 
 # Build native libraries for all platforms, copy to package root + npm dirs.
 build-all:
-	cargo build --release --target aarch64-apple-darwin
-	cargo build --release --target x86_64-apple-darwin
-	cargo zigbuild --release --target x86_64-unknown-linux-gnu
-	cargo zigbuild --release --target aarch64-unknown-linux-gnu
-	cargo zigbuild --release --target x86_64-pc-windows-gnu
+	cargo build --release -p quasar-svm-ffi --target aarch64-apple-darwin
+	cargo build --release -p quasar-svm-ffi --target x86_64-apple-darwin
+	cargo zigbuild --release -p quasar-svm-ffi --target x86_64-unknown-linux-gnu
+	cargo zigbuild --release -p quasar-svm-ffi --target aarch64-unknown-linux-gnu
+	cargo zigbuild --release -p quasar-svm-ffi --target x86_64-pc-windows-gnu
 	cp target/aarch64-apple-darwin/release/libquasar_svm.dylib  libquasar_svm.dylib
 	cp target/x86_64-apple-darwin/release/libquasar_svm.dylib   libquasar_svm_x64.dylib
 	cp target/x86_64-unknown-linux-gnu/release/libquasar_svm.so libquasar_svm_x64.so

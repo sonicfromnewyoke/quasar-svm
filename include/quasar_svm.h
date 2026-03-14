@@ -19,42 +19,40 @@
 
 #define QUASAR_ERR_INTERNAL -99
 
-typedef struct QuasarSvm QuasarSvm;
-
 const char *quasar_last_error(void);
 
-struct QuasarSvm *quasar_svm_new(void);
+QuasarSvm *quasar_svm_new(void);
 
-void quasar_svm_free(struct QuasarSvm *svm);
+void quasar_svm_free(QuasarSvm *svm);
 
-int32_t quasar_svm_add_program(struct QuasarSvm *svm,
+int32_t quasar_svm_add_program(QuasarSvm *svm,
                                const uint8_t (*program_id)[32],
                                const uint8_t *elf_data,
                                uint64_t elf_len,
                                uint8_t loader_version);
 
-int32_t quasar_svm_set_clock(struct QuasarSvm *svm,
+int32_t quasar_svm_set_clock(QuasarSvm *svm,
                              uint64_t slot,
                              int64_t epoch_start_timestamp,
                              uint64_t epoch,
                              uint64_t leader_schedule_epoch,
                              int64_t unix_timestamp);
 
-int32_t quasar_svm_warp_to_slot(struct QuasarSvm *svm, uint64_t slot);
+int32_t quasar_svm_warp_to_slot(QuasarSvm *svm, uint64_t slot);
 
-int32_t quasar_svm_set_rent(struct QuasarSvm *svm,
+int32_t quasar_svm_set_rent(QuasarSvm *svm,
                             uint64_t lamports_per_byte_year,
                             double exemption_threshold,
                             uint8_t burn_percent);
 
-int32_t quasar_svm_set_epoch_schedule(struct QuasarSvm *svm,
+int32_t quasar_svm_set_epoch_schedule(QuasarSvm *svm,
                                       uint64_t slots_per_epoch,
                                       uint64_t leader_schedule_slot_offset,
                                       bool warmup,
                                       uint64_t first_normal_epoch,
                                       uint64_t first_normal_slot);
 
-int32_t quasar_svm_set_compute_budget(struct QuasarSvm *svm, uint64_t max_units);
+int32_t quasar_svm_set_compute_budget(QuasarSvm *svm, uint64_t max_units);
 
 /**
  * Execute one or more instructions with shared, persisted account state.
@@ -62,7 +60,7 @@ int32_t quasar_svm_set_compute_budget(struct QuasarSvm *svm, uint64_t max_units)
  * `instructions` / `instructions_len`: count-prefixed serialized instructions.
  * `accounts` / `accounts_len`: serialized accounts (wire format).
  */
-int32_t quasar_svm_process_instructions(struct QuasarSvm *svm,
+int32_t quasar_svm_process_instructions(QuasarSvm *svm,
                                         const uint8_t *instructions,
                                         uint64_t instructions_len,
                                         const uint8_t *accounts,
@@ -76,7 +74,7 @@ int32_t quasar_svm_process_instructions(struct QuasarSvm *svm,
  * `instructions` / `instructions_len`: count-prefixed serialized instructions.
  * `accounts` / `accounts_len`: serialized accounts (wire format).
  */
-int32_t quasar_svm_process_transaction(struct QuasarSvm *svm,
+int32_t quasar_svm_process_transaction(QuasarSvm *svm,
                                        const uint8_t *instructions,
                                        uint64_t instructions_len,
                                        const uint8_t *accounts,

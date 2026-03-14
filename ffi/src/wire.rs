@@ -55,12 +55,9 @@
 //! [N]   error_message UTF-8 bytes
 //! ```
 
-use solana_account::Account;
-use solana_instruction::{AccountMeta, Instruction};
+use quasar_svm::{Account, ExecutionResult, Instruction, Pubkey};
+use solana_instruction::AccountMeta;
 use solana_program_error::ProgramError;
-use solana_pubkey::Pubkey;
-
-use crate::svm::ExecutionResult;
 
 // ---------------------------------------------------------------------------
 // Reader

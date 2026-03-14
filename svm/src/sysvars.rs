@@ -8,10 +8,10 @@ use solana_hash::Hash;
 use solana_program_runtime::sysvar_cache::SysvarCache;
 use solana_pubkey::Pubkey;
 use solana_rent::Rent;
-use solana_slot_hashes::{SlotHashes, MAX_ENTRIES as SLOT_HASHES_MAX_ENTRIES};
+use solana_slot_hashes::{MAX_ENTRIES as SLOT_HASHES_MAX_ENTRIES, SlotHashes};
 use solana_stake_interface::stake_history::{StakeHistory, StakeHistoryEntry};
 use solana_sysvar::{
-    last_restart_slot::LastRestartSlot, recent_blockhashes::RecentBlockhashes, SysvarSerialize,
+    SysvarSerialize, last_restart_slot::LastRestartSlot, recent_blockhashes::RecentBlockhashes,
 };
 use solana_sysvar_id::SysvarId;
 
@@ -110,11 +110,7 @@ impl Sysvars {
                 .collect::<Vec<_>>();
             self.slot_hashes = SlotHashes::new(&slot_hash_entries);
         } else {
-            let i = self
-                .slot_hashes
-                .first()
-                .map(|h| h.0)
-                .unwrap_or(0);
+            let i = self.slot_hashes.first().map(|h| h.0).unwrap_or(0);
             for s in i..slot {
                 self.slot_hashes.add(s, Hash::default());
             }
