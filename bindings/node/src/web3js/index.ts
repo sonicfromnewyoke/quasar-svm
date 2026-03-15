@@ -1,4 +1,4 @@
-import { PublicKey } from "@solana/web3.js";
+import { Keypair, PublicKey } from "@solana/web3.js";
 import type { TransactionInstruction, KeyedAccountInfo, AccountInfo } from "@solana/web3.js";
 import * as ffi from "../ffi.js";
 import {
@@ -159,12 +159,12 @@ export class QuasarSvm {
   /** Execute a transaction without committing any state changes. */
   simulateTransaction(
     instructions: TransactionInstruction[],
-    accounts: KeyedAccountInfo[]
+    accounts: KeyedAccountInfo[] | Record<string, KeyedAccountInfo>
   ): ExecutionResult<KeyedAccountInfo> {
     return this.exec(
       ffi.quasar_svm_simulate_transaction,
       serializeInstructions(instructions),
-      serializeAccounts(accounts)
+      serializeAccounts(flattenAccounts(accounts))
     );
   }
 
@@ -232,24 +232,24 @@ export class QuasarSvm {
 
   processInstruction(
     instructions: TransactionInstruction | TransactionInstruction[],
-    accounts: KeyedAccountInfo[]
+    accounts: KeyedAccountInfo[] | Record<string, KeyedAccountInfo>
   ): ExecutionResult<KeyedAccountInfo> {
     const ixs = Array.isArray(instructions) ? instructions : [instructions];
     return this.exec(
       ffi.quasar_svm_process_instructions,
       serializeInstructions(ixs),
-      serializeAccounts(accounts)
+      serializeAccounts(flattenAccounts(accounts))
     );
   }
 
   processTransaction(
     instructions: TransactionInstruction[],
-    accounts: KeyedAccountInfo[]
+    accounts: KeyedAccountInfo[] | Record<string, KeyedAccountInfo>
   ): ExecutionResult<KeyedAccountInfo> {
     return this.exec(
       ffi.quasar_svm_process_transaction,
       serializeInstructions(instructions),
-      serializeAccounts(accounts)
+      serializeAccounts(flattenAccounts(accounts))
     );
   }
 
@@ -388,6 +388,64 @@ export function tokenBurn(
     ],
     data: tokenBurnData(amount),
   };
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function flattenAccounts(accounts: KeyedAccountInfo[] | Record<string, KeyedAccountInfo>): KeyedAccountInfo[] {
+  return Array.isArray(accounts) ? accounts : Object.values(accounts);
+}
+
+// ---------------------------------------------------------------------------
+// User
+// ---------------------------------------------------------------------------
+
+interface UserToken {
+  mint: PublicKey;
+  amount: bigint;
+  tokenProgramId?: PublicKey;
+}
+
+/** A test user with a system account and optional token positions. */
+export class User {
+  readonly pubkey: PublicKey;
+  private system: KeyedAccountInfo;
+  private atas: Map<string, KeyedAccountInfo> = new Map();
+
+  private constructor(pubkey: PublicKey, sol: bigint) {
+    this.pubkey = pubkey;
+    this.system = createSystemAccount(pubkey, sol);
+  }
+
+  /** Create a new test user with the given SOL balance and token positions. */
+  static async create(sol: bigint, tokens: UserToken[] = []): Promise<User> {
+    const kp = await Keypair.generate();
+    const user = new User(kp.publicKey, sol);
+    for (const t of tokens) {
+      const programId = t.tokenProgramId ?? new PublicKey(SPL_TOKEN_PROGRAM_ID);
+      const acct = createAssociatedTokenAccount(user.pubkey, t.mint, t.amount, programId);
+      user.atas.set(t.mint.toBase58(), acct);
+    }
+    return user;
+  }
+
+  /** Get the ATA address for a given mint. */
+  ata(mint: PublicKey): PublicKey {
+    const acct = this.atas.get(mint.toBase58());
+    if (acct) return acct.accountId;
+    const [addr] = PublicKey.findProgramAddressSync(
+      [this.pubkey.toBuffer(), new PublicKey(SPL_TOKEN_PROGRAM_ID).toBuffer(), mint.toBuffer()],
+      new PublicKey(SPL_ASSOCIATED_TOKEN_PROGRAM_ID),
+    );
+    return addr;
+  }
+
+  /** Flatten all accounts (system + token) for processInstruction. */
+  accounts(): KeyedAccountInfo[] {
+    return [this.system, ...this.atas.values()];
+  }
 }
 
 // ---------------------------------------------------------------------------

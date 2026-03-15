@@ -1,5 +1,6 @@
 import type { Address } from "@solana/addresses";
-import { address, getAddressEncoder, getAddressDecoder, getProgramDerivedAddress } from "@solana/addresses";
+import { address, getAddressEncoder, getAddressDecoder, getAddressFromPublicKey, getProgramDerivedAddress } from "@solana/addresses";
+import { generateKeyPair } from "@solana/keys";
 import type { Instruction } from "@solana/instructions";
 import { lamports } from "@solana/rpc-types";
 import * as ffi from "../ffi.js";
@@ -229,12 +230,12 @@ export class QuasarSvm {
   /** Execute a transaction without committing any state changes. */
   simulateTransaction(
     instructions: Instruction[],
-    accounts: SvmAccount[]
+    accounts: SvmAccount[] | Record<string, SvmAccount>
   ): ExecutionResult<SvmAccount> {
     return this.exec(
       ffi.quasar_svm_simulate_transaction,
       serializeInstructions(instructions),
-      serializeAccounts(accounts)
+      serializeAccounts(flattenAccounts(accounts))
     );
   }
 
@@ -257,24 +258,24 @@ export class QuasarSvm {
 
   processInstruction(
     instructions: Instruction | Instruction[],
-    accounts: SvmAccount[]
+    accounts: SvmAccount[] | Record<string, SvmAccount>
   ): ExecutionResult<SvmAccount> {
     const ixs = Array.isArray(instructions) ? instructions : [instructions];
     return this.exec(
       ffi.quasar_svm_process_instructions,
       serializeInstructions(ixs),
-      serializeAccounts(accounts)
+      serializeAccounts(flattenAccounts(accounts))
     );
   }
 
   processTransaction(
     instructions: Instruction[],
-    accounts: SvmAccount[]
+    accounts: SvmAccount[] | Record<string, SvmAccount>
   ): ExecutionResult<SvmAccount> {
     return this.exec(
       ffi.quasar_svm_process_transaction,
       serializeInstructions(instructions),
-      serializeAccounts(accounts)
+      serializeAccounts(flattenAccounts(accounts))
     );
   }
 
@@ -415,6 +416,61 @@ export function tokenBurn(
     ],
     data: tokenBurnData(amount),
   };
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function flattenAccounts(accounts: SvmAccount[] | Record<string, SvmAccount>): SvmAccount[] {
+  return Array.isArray(accounts) ? accounts : Object.values(accounts);
+}
+
+// ---------------------------------------------------------------------------
+// User
+// ---------------------------------------------------------------------------
+
+interface UserToken {
+  mint: Address;
+  amount: bigint;
+  tokenProgramId?: Address;
+}
+
+/** A test user with a system account and optional token positions. */
+export class User {
+  readonly pubkey: Address;
+  private system: SvmAccount;
+  private atas: Map<string, SvmAccount> = new Map();
+
+  private constructor(pubkey: Address, sol: bigint) {
+    this.pubkey = pubkey;
+    this.system = createSystemAccount(pubkey, sol);
+  }
+
+  /** Create a new test user with the given SOL balance and token positions. */
+  static async create(sol: bigint, tokens: UserToken[] = []): Promise<User> {
+    const kp = await generateKeyPair();
+    const pubkey = await getAddressFromPublicKey(kp.publicKey);
+    const user = new User(pubkey, sol);
+    for (const t of tokens) {
+      const programId = t.tokenProgramId ?? address(SPL_TOKEN_PROGRAM_ID);
+      const acct = await createAssociatedTokenAccount(pubkey, t.mint, t.amount, programId);
+      user.atas.set(t.mint, acct);
+    }
+    return user;
+  }
+
+  /** Get the ATA address for a given mint. */
+  ata(mint: Address): Address {
+    const acct = this.atas.get(mint);
+    if (acct) return acct.address;
+    throw new Error(`No ATA for mint ${mint}`);
+  }
+
+  /** Flatten all accounts (system + token) for processInstruction. */
+  accounts(): SvmAccount[] {
+    return [this.system, ...this.atas.values()];
+  }
 }
 
 // ---------------------------------------------------------------------------
