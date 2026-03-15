@@ -12,6 +12,7 @@ import {
   SPL_TOKEN_PROGRAM_ID,
   SPL_TOKEN_2022_PROGRAM_ID,
   SPL_ASSOCIATED_TOKEN_PROGRAM_ID,
+  SYSTEM_PROGRAM_ID,
   LOADER_V2,
   LOADER_V3,
   loadElf,
@@ -31,14 +32,14 @@ export { SPL_TOKEN_PROGRAM_ID, SPL_TOKEN_2022_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_P
 export { TokenAccountState } from "../token.js";
 export type { MintData, TokenAccountData } from "../token.js";
 
-interface MintOpts {
+export interface MintOpts {
   mintAuthority?: PublicKey;
   supply?: bigint;
   decimals?: number;
   freezeAuthority?: PublicKey;
 }
 
-interface TokenAccountOpts {
+export interface TokenAccountOpts {
   mint: PublicKey;
   owner: PublicKey;
   amount: bigint;
@@ -96,37 +97,6 @@ export class QuasarSvm {
 
   addSystemProgram(): this {
     return this;
-  }
-
-  /** Store a pre-initialized SPL Token mint account. */
-  addMintAccount(pubkey: PublicKey, opts: MintOpts): void {
-    this.addMintAccountWithProgram(pubkey, opts, SPL_TOKEN_PROGRAM_ID);
-  }
-
-  /** Store a pre-initialized Token-2022 mint account. */
-  addMintAccount2022(pubkey: PublicKey, opts: MintOpts): void {
-    this.addMintAccountWithProgram(pubkey, opts, SPL_TOKEN_2022_PROGRAM_ID);
-  }
-
-  /** Store a pre-initialized SPL Token token account. */
-  addTokenAccount(pubkey: PublicKey, opts: TokenAccountOpts): void {
-    this.addTokenAccountWithProgram(pubkey, opts, SPL_TOKEN_PROGRAM_ID);
-  }
-
-  /** Store a pre-initialized Token-2022 token account. */
-  addTokenAccount2022(pubkey: PublicKey, opts: TokenAccountOpts): void {
-    this.addTokenAccountWithProgram(pubkey, opts, SPL_TOKEN_2022_PROGRAM_ID);
-  }
-
-  /** Derive the ATA address and store a pre-initialized token account. Returns the ATA pubkey. */
-  addAssociatedTokenAccount(wallet: PublicKey, mint: PublicKey, amount: bigint, tokenProgramId = new PublicKey(SPL_TOKEN_PROGRAM_ID)): PublicKey {
-    const ataProgramId = new PublicKey(SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
-    const [ata] = PublicKey.findProgramAddressSync(
-      [wallet.toBuffer(), tokenProgramId.toBuffer(), mint.toBuffer()],
-      ataProgramId
-    );
-    this.addTokenAccountWithProgram(ata, { mint, owner: wallet, amount }, tokenProgramId.toBase58());
-    return ata;
   }
 
   /** Store an account in the SVM's persistent account database. */
@@ -285,42 +255,6 @@ export class QuasarSvm {
 
   // ---------- internal ----------
 
-  private addMintAccountWithProgram(pubkey: PublicKey, opts: MintOpts, programId: string): void {
-    const data = packMint({
-      mintAuthority: opts.mintAuthority?.toBuffer(),
-      supply: opts.supply,
-      decimals: opts.decimals,
-      freezeAuthority: opts.freezeAuthority?.toBuffer(),
-    });
-    const owner = new PublicKey(programId);
-    this.check(
-      ffi.quasar_svm_set_account(
-        this.ptr, pubkey.toBuffer(), owner.toBuffer(),
-        rentMinimumBalance(MINT_LEN), data, MINT_LEN, false
-      )
-    );
-  }
-
-  private addTokenAccountWithProgram(pubkey: PublicKey, opts: TokenAccountOpts, programId: string): void {
-    const data = packTokenAccount({
-      mint: opts.mint.toBuffer(),
-      owner: opts.owner.toBuffer(),
-      amount: opts.amount,
-      delegate: opts.delegate?.toBuffer(),
-      state: opts.state,
-      isNative: opts.isNative,
-      delegatedAmount: opts.delegatedAmount,
-      closeAuthority: opts.closeAuthority?.toBuffer(),
-    });
-    const owner = new PublicKey(programId);
-    this.check(
-      ffi.quasar_svm_set_account(
-        this.ptr, pubkey.toBuffer(), owner.toBuffer(),
-        rentMinimumBalance(TOKEN_ACCOUNT_LEN), data, TOKEN_ACCOUNT_LEN, false
-      )
-    );
-  }
-
   private check(code: number): void {
     if (code !== 0) {
       throw new Error(
@@ -453,5 +387,99 @@ export function tokenBurn(
       { pubkey: authority, isSigner: true, isWritable: false },
     ],
     data: tokenBurnData(amount),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Account factories
+// ---------------------------------------------------------------------------
+
+/** Create a system-owned account with the given lamports. */
+export function createSystemAccount(pubkey: PublicKey, sol: bigint): KeyedAccountInfo {
+  return {
+    accountId: pubkey,
+    accountInfo: {
+      owner: new PublicKey(SYSTEM_PROGRAM_ID),
+      lamports: sol,
+      data: Buffer.alloc(0),
+      executable: false,
+    },
+  };
+}
+
+/** Create a pre-initialized associated token account. Derives the ATA address automatically. */
+export function createAssociatedTokenAccount(
+  owner: PublicKey,
+  mint: PublicKey,
+  amount: bigint,
+  tokenProgramId = new PublicKey(SPL_TOKEN_PROGRAM_ID),
+): KeyedAccountInfo {
+  const [ata] = PublicKey.findProgramAddressSync(
+    [owner.toBuffer(), tokenProgramId.toBuffer(), mint.toBuffer()],
+    new PublicKey(SPL_ASSOCIATED_TOKEN_PROGRAM_ID),
+  );
+  const data = packTokenAccount({
+    mint: mint.toBuffer(),
+    owner: owner.toBuffer(),
+    amount,
+  });
+  return {
+    accountId: ata,
+    accountInfo: {
+      owner: tokenProgramId,
+      lamports: rentMinimumBalance(TOKEN_ACCOUNT_LEN),
+      data,
+      executable: false,
+    },
+  };
+}
+
+/** Create a pre-initialized token account (non-ATA). */
+export function createTokenAccount(
+  pubkey: PublicKey,
+  opts: TokenAccountOpts,
+  tokenProgramId = new PublicKey(SPL_TOKEN_PROGRAM_ID),
+): KeyedAccountInfo {
+  const data = packTokenAccount({
+    mint: opts.mint.toBuffer(),
+    owner: opts.owner.toBuffer(),
+    amount: opts.amount,
+    delegate: opts.delegate?.toBuffer(),
+    state: opts.state,
+    isNative: opts.isNative,
+    delegatedAmount: opts.delegatedAmount,
+    closeAuthority: opts.closeAuthority?.toBuffer(),
+  });
+  return {
+    accountId: pubkey,
+    accountInfo: {
+      owner: tokenProgramId,
+      lamports: rentMinimumBalance(TOKEN_ACCOUNT_LEN),
+      data,
+      executable: false,
+    },
+  };
+}
+
+/** Create a pre-initialized mint account. */
+export function createMintAccount(
+  pubkey: PublicKey,
+  opts: MintOpts = {},
+  tokenProgramId = new PublicKey(SPL_TOKEN_PROGRAM_ID),
+): KeyedAccountInfo {
+  const data = packMint({
+    mintAuthority: opts.mintAuthority?.toBuffer(),
+    supply: opts.supply,
+    decimals: opts.decimals,
+    freezeAuthority: opts.freezeAuthority?.toBuffer(),
+  });
+  return {
+    accountId: pubkey,
+    accountInfo: {
+      owner: tokenProgramId,
+      lamports: rentMinimumBalance(MINT_LEN),
+      data,
+      executable: false,
+    },
   };
 }

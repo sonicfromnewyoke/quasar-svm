@@ -3,8 +3,6 @@ use solana_instruction::{AccountMeta, Instruction};
 use solana_pubkey::Pubkey;
 use solana_rent::Rent;
 
-use crate::{SPL_TOKEN_PROGRAM_ID, SPL_TOKEN_2022_PROGRAM_ID};
-
 // ---------------------------------------------------------------------------
 // Mint
 // ---------------------------------------------------------------------------
@@ -232,103 +230,58 @@ fn pack_coption_u64(opt: &Option<u64>, buf: &mut [u8], o: &mut usize) {
 }
 
 // ---------------------------------------------------------------------------
-// QuasarSvm helpers
+// Account factories (standalone — no QuasarSvm needed)
 // ---------------------------------------------------------------------------
 
-use crate::QuasarSvm;
-
-impl QuasarSvm {
-    /// Store a pre-initialized SPL Token mint account.
-    pub fn add_mint_account(&mut self, pubkey: &Pubkey, mint: &Mint) {
-        let data = mint.pack();
-        let account = Account {
-            lamports: Rent::default().minimum_balance(Mint::LEN),
-            data,
-            owner: SPL_TOKEN_PROGRAM_ID,
-            executable: false,
-            rent_epoch: 0,
-        };
-        self.set_account(*pubkey, account);
+/// Create a system-owned account with the given lamports.
+pub fn create_system_account(lamports: u64) -> Account {
+    Account {
+        lamports,
+        data: vec![],
+        owner: solana_sdk_ids::system_program::ID,
+        executable: false,
+        rent_epoch: 0,
     }
+}
 
-    /// Store a pre-initialized SPL Token token account.
-    pub fn add_token_account(&mut self, pubkey: &Pubkey, token: &Token) {
-        let data = token.pack();
-        let account = Account {
-            lamports: Rent::default().minimum_balance(Token::LEN),
-            data,
-            owner: SPL_TOKEN_PROGRAM_ID,
-            executable: false,
-            rent_epoch: 0,
-        };
-        self.set_account(*pubkey, account);
+/// Create a pre-initialized mint account.
+pub fn create_mint_account(mint: &Mint, token_program_id: &Pubkey) -> Account {
+    Account {
+        lamports: Rent::default().minimum_balance(Mint::LEN),
+        data: mint.pack(),
+        owner: *token_program_id,
+        executable: false,
+        rent_epoch: 0,
     }
+}
 
-    /// Store a pre-initialized Token-2022 mint account.
-    pub fn add_mint_account_2022(&mut self, pubkey: &Pubkey, mint: &Mint) {
-        let data = mint.pack();
-        let account = Account {
-            lamports: Rent::default().minimum_balance(Mint::LEN),
-            data,
-            owner: SPL_TOKEN_2022_PROGRAM_ID,
-            executable: false,
-            rent_epoch: 0,
-        };
-        self.set_account(*pubkey, account);
+/// Create a pre-initialized token account.
+pub fn create_token_account(token: &Token, token_program_id: &Pubkey) -> Account {
+    Account {
+        lamports: Rent::default().minimum_balance(Token::LEN),
+        data: token.pack(),
+        owner: *token_program_id,
+        executable: false,
+        rent_epoch: 0,
     }
+}
 
-    /// Store a pre-initialized Token-2022 token account.
-    pub fn add_token_account_2022(&mut self, pubkey: &Pubkey, token: &Token) {
-        let data = token.pack();
-        let account = Account {
-            lamports: Rent::default().minimum_balance(Token::LEN),
-            data,
-            owner: SPL_TOKEN_2022_PROGRAM_ID,
-            executable: false,
-            rent_epoch: 0,
-        };
-        self.set_account(*pubkey, account);
-    }
-
-    /// Derive the ATA address and store a pre-initialized token account.
-    /// Works for both Token and Token-2022. Returns the derived ATA pubkey.
-    pub fn add_associated_token_account(
-        &mut self,
-        wallet: &Pubkey,
-        mint: &Pubkey,
-        amount: u64,
-        token_program_id: &Pubkey,
-    ) -> Pubkey {
-        let ata = get_associated_token_address(wallet, mint, token_program_id);
-        let data = Token {
-            mint: *mint,
-            owner: *wallet,
-            amount,
-            ..Default::default()
-        }
-        .pack();
-        let account = Account {
-            lamports: Rent::default().minimum_balance(Token::LEN),
-            data,
-            owner: *token_program_id,
-            executable: false,
-            rent_epoch: 0,
-        };
-        self.set_account(ata, account);
-        ata
-    }
-
-    /// Builder-style: store a pre-initialized SPL Token mint account.
-    pub fn with_mint_account(mut self, pubkey: &Pubkey, mint: &Mint) -> Self {
-        self.add_mint_account(pubkey, mint);
-        self
-    }
-
-    /// Builder-style: store a pre-initialized SPL Token token account.
-    pub fn with_token_account(mut self, pubkey: &Pubkey, token: &Token) -> Self {
-        self.add_token_account(pubkey, token);
-        self
-    }
+/// Create a pre-initialized associated token account.
+/// Returns `(ata_pubkey, account)`.
+pub fn create_associated_token_account(
+    wallet: &Pubkey,
+    mint: &Pubkey,
+    amount: u64,
+    token_program_id: &Pubkey,
+) -> (Pubkey, Account) {
+    let ata = get_associated_token_address(wallet, mint, token_program_id);
+    let token = Token {
+        mint: *mint,
+        owner: *wallet,
+        amount,
+        ..Default::default()
+    };
+    (ata, create_token_account(&token, token_program_id))
 }
 
 // ---------------------------------------------------------------------------
