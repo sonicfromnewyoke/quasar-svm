@@ -29,8 +29,13 @@ let svm = QuasarSvm::new()
 ```
 
 ```ts
+// web3.js — programId is PublicKey
 vm.addProgram(programId, elf);             // loader v3 (default)
 vm.addProgram(programId, elf, LOADER_V2);  // loader v2
+
+// kit — programId is Address
+vm.addProgram(programId, elf);
+vm.addProgram(programId, elf, LOADER_V2);
 ```
 
 Load bundled SPL programs:
@@ -71,11 +76,22 @@ let result = svm.simulate_transaction(&[ix], &accounts);
 
 Accounts are `&[(Pubkey, Account)]` — a slice of `(address, account_data)` pairs.
 
-**TypeScript:**
+**TypeScript (web3.js):**
 
 ```ts
+// ix: TransactionInstruction, accounts: KeyedAccountInfo[] | Record<string, KeyedAccountInfo>
 const result = vm.processInstruction(ix, accounts);      // single instruction
 const result = vm.processInstruction([ix1, ix2], accounts); // multiple
+const result = vm.processTransaction([ix1, ix2], accounts);
+const result = vm.simulateTransaction([ix1, ix2], accounts);
+```
+
+**TypeScript (kit):**
+
+```ts
+// ix: Instruction, accounts: SvmAccount[] | Record<string, SvmAccount>
+const result = vm.processInstruction(ix, accounts);
+const result = vm.processInstruction([ix1, ix2], accounts);
 const result = vm.processTransaction([ix1, ix2], accounts);
 const result = vm.simulateTransaction([ix1, ix2], accounts);
 ```
@@ -99,8 +115,15 @@ svm.create_account(&pubkey, space, &owner);
 ```
 
 ```ts
+// web3.js — pubkey: PublicKey, accountInfo: AccountInfo<Buffer>
 vm.setAccount(pubkey, accountInfo);
-const acct = vm.getAccount(pubkey);
+const acct: KeyedAccountInfo | null = vm.getAccount(pubkey);
+vm.airdrop(pubkey, 1_000_000_000n);
+vm.createAccount(pubkey, 0n, owner);
+
+// kit — pubkey: Address, account: SvmAccount
+vm.setAccount(account);  // address is inside SvmAccount
+const acct: SvmAccount | null = vm.getAccount(pubkey);
 vm.airdrop(pubkey, 1_000_000_000n);
 vm.createAccount(pubkey, 0n, owner);
 ```
@@ -197,9 +220,10 @@ result.print_logs();
 let state: MyState = result.account_data(&pubkey).unwrap();
 ```
 
-**TypeScript:**
+**TypeScript (web3.js):**
 
 ```ts
+// result: ExecutionResult<KeyedAccountInfo>
 assertSuccess(result);
 assertError(result, { type: "InsufficientFunds" });
 assertError(result, { type: "Custom", code: 6001 });
@@ -207,6 +231,18 @@ assertError(result, { type: "Custom", code: 6001 });
 if (result.status.ok) { /* success */ }
 console.log(result.computeUnits);
 console.log(result.logs);
+```
+
+**TypeScript (kit):**
+
+```ts
+// result: ExecutionResult<SvmAccount>
+assertSuccess(result);
+assertError(result, { type: "InsufficientFunds" });
+assertError(result, { type: "Custom", code: 6001 });
+
+// Same API — only the account type differs
+result.accounts; // SvmAccount[] (has .address, .programAddress, .data)
 ```
 
 ### ProgramError

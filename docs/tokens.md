@@ -23,11 +23,11 @@ let mint = Mint::default();
 let mint = Mint { decimals: 6, supply: 10_000, ..Default::default() };
 ```
 
-**TypeScript:**
+**TypeScript (web3.js):**
 
 ```ts
 interface MintOpts {
-  mintAuthority?: PublicKey;  // or Address (kit)
+  mintAuthority?: PublicKey;
   supply?: bigint;
   decimals?: number;         // default: 9
   freezeAuthority?: PublicKey;
@@ -35,6 +35,19 @@ interface MintOpts {
 
 createMintAccount(pubkey, { decimals: 6, supply: 10_000n });
 createMintAccount(pubkey, {}); // defaults: decimals 9, supply 0
+```
+
+**TypeScript (kit):**
+
+```ts
+interface MintOpts {
+  mintAuthority?: Address;
+  supply?: bigint;
+  decimals?: number;
+  freezeAuthority?: Address;
+}
+
+createMintAccount(addr, { decimals: 6, supply: 10_000n });
 ```
 
 ### Token
@@ -59,11 +72,11 @@ pub struct Token {
 let token = Token { mint, owner, amount: 5_000, ..Default::default() };
 ```
 
-**TypeScript:**
+**TypeScript (web3.js):**
 
 ```ts
 interface TokenAccountOpts {
-  mint: PublicKey;           // or Address (kit)
+  mint: PublicKey;
   owner: PublicKey;
   amount: bigint;
   delegate?: PublicKey;
@@ -71,6 +84,21 @@ interface TokenAccountOpts {
   isNative?: bigint;
   delegatedAmount?: bigint;
   closeAuthority?: PublicKey;
+}
+```
+
+**TypeScript (kit):**
+
+```ts
+interface TokenAccountOpts {
+  mint: Address;
+  owner: Address;
+  amount: bigint;
+  delegate?: Address;
+  state?: TokenAccountState;
+  isNative?: bigint;
+  delegatedAmount?: bigint;
+  closeAuthority?: Address;
 }
 ```
 
@@ -108,12 +136,23 @@ let ix = token_transfer(&source, &destination, &authority, 1_000, &SPL_TOKEN_202
 ```
 
 ```ts
+// web3.js — args are PublicKey, returns TransactionInstruction
 import { tokenTransfer } from "@blueshift-gg/quasar-svm/web3.js";
 
 const ix = tokenTransfer(source, destination, authority, 1_000n);
 
 // Token-2022
 const ix = tokenTransfer(source, destination, authority, 1_000n, new PublicKey(SPL_TOKEN_2022_PROGRAM_ID));
+```
+
+```ts
+// kit — args are Address, returns Instruction
+import { tokenTransfer } from "@blueshift-gg/quasar-svm/kit";
+
+const ix = tokenTransfer(source, destination, authority, 1_000n);
+
+// Token-2022
+const ix = tokenTransfer(source, destination, authority, 1_000n, address(SPL_TOKEN_2022_PROGRAM_ID));
 ```
 
 ### MintTo
@@ -125,7 +164,13 @@ let ix = token_mint_to(&mint, &destination, &mint_authority, 5_000, &SPL_TOKEN_P
 ```
 
 ```ts
+// web3.js
 import { tokenMintTo } from "@blueshift-gg/quasar-svm/web3.js";
+
+const ix = tokenMintTo(mint, destination, mintAuthority, 5_000n);
+
+// kit
+import { tokenMintTo } from "@blueshift-gg/quasar-svm/kit";
 
 const ix = tokenMintTo(mint, destination, mintAuthority, 5_000n);
 ```
@@ -139,7 +184,13 @@ let ix = token_burn(&source, &mint, &authority, 500, &SPL_TOKEN_PROGRAM_ID);
 ```
 
 ```ts
+// web3.js
 import { tokenBurn } from "@blueshift-gg/quasar-svm/web3.js";
+
+const ix = tokenBurn(source, mint, authority, 500n);
+
+// kit
+import { tokenBurn } from "@blueshift-gg/quasar-svm/kit";
 
 const ix = tokenBurn(source, mint, authority, 500n);
 ```
@@ -158,12 +209,19 @@ assert_eq!(token.owner, alice.pubkey);
 ```
 
 ```ts
+// web3.js
 import { tokenAccount } from "@blueshift-gg/quasar-svm/web3.js";
 
 const result = vm.processInstruction(ix, accounts);
 const token = tokenAccount(result, ataPubkey);
 console.log(token?.amount);  // 1000n
 console.log(token?.owner);   // Uint8Array (32 bytes)
+
+// kit
+import { tokenAccount } from "@blueshift-gg/quasar-svm/kit";
+
+const token = tokenAccount(result, ataAddress);
+console.log(token?.amount);  // 1000n
 ```
 
 ### Mint Account
@@ -175,11 +233,18 @@ assert_eq!(mint_state.decimals, 6);
 ```
 
 ```ts
+// web3.js
 import { mintAccount } from "@blueshift-gg/quasar-svm/web3.js";
 
 const mint = mintAccount(result, mintPubkey);
 console.log(mint?.supply);   // 15000n
 console.log(mint?.decimals); // 6
+
+// kit
+import { mintAccount } from "@blueshift-gg/quasar-svm/kit";
+
+const mint = mintAccount(result, mintAddress);
+console.log(mint?.supply);   // 15000n
 ```
 
 ## ATA Derivation
@@ -257,6 +322,8 @@ assert_eq!(result.token_account(&bob.ata(&mint)).unwrap().amount, 1_000);
 assert_eq!(result.token_account(&alice.ata(&mint)).unwrap().amount, 4_000);
 ```
 
+**web3.js:**
+
 ```ts
 import {
   QuasarSvm, User,
@@ -267,6 +334,35 @@ import { Keypair } from "@solana/web3.js";
 const vm = new QuasarSvm().addTokenProgram();
 
 const mint = (await Keypair.generate()).publicKey;
+const mintAcct = createMintAccount(mint, { decimals: 6, supply: 10_000n });
+
+const alice = await User.create(1_000_000_000n, [{ mint, amount: 5_000n }]);
+const bob   = await User.create(1_000_000_000n, [{ mint, amount: 0n }]);
+
+const ix = tokenTransfer(alice.ata(mint), bob.ata(mint), alice.pubkey, 1_000n);
+
+const result = vm.processInstruction(ix, [mintAcct, ...alice.accounts(), ...bob.accounts()]);
+
+assertSuccess(result);
+console.log(tokenAccount(result, bob.ata(mint))?.amount);   // 1000n
+console.log(tokenAccount(result, alice.ata(mint))?.amount); // 4000n
+
+vm.free();
+```
+
+**kit:**
+
+```ts
+import {
+  QuasarSvm, User,
+  createMintAccount, tokenTransfer, tokenAccount, assertSuccess,
+} from "@blueshift-gg/quasar-svm/kit";
+import { generateKeyPair, getAddressFromPublicKey } from "@solana/keys";
+
+const vm = new QuasarSvm().addTokenProgram();
+
+const mintKp = await generateKeyPair();
+const mint = await getAddressFromPublicKey(mintKp.publicKey);
 const mintAcct = createMintAccount(mint, { decimals: 6, supply: 10_000n });
 
 const alice = await User.create(1_000_000_000n, [{ mint, amount: 5_000n }]);
