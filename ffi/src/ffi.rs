@@ -5,7 +5,7 @@ use std::slice;
 use crate::error::*;
 use crate::wire;
 use quasar_svm::loader_keys;
-use quasar_svm::{QuasarSvm, SvmAccount};
+use quasar_svm::{QuasarSvm, Account};
 
 // ---------------------------------------------------------------------------
 // Error query
@@ -194,7 +194,7 @@ pub extern "C" fn quasar_svm_set_compute_budget(svm: *mut QuasarSvm, max_units: 
 // ---------------------------------------------------------------------------
 
 /// Store an account in the SVM's account database.
-/// The account is provided as raw fields (SvmAccount-style).
+/// The account is provided as raw fields (Account-style).
 #[unsafe(no_mangle)]
 pub extern "C" fn quasar_svm_set_account(
     svm: *mut QuasarSvm,
@@ -218,7 +218,7 @@ pub extern "C" fn quasar_svm_set_account(
     } else {
         unsafe { slice::from_raw_parts(data, data_len as usize) }.to_vec()
     };
-    svm.set_account(SvmAccount {
+    svm.set_account(Account {
         address: pk,
         lamports,
         data: account_data,
@@ -229,7 +229,7 @@ pub extern "C" fn quasar_svm_set_account(
 }
 
 /// Read an account from the SVM's account database.
-/// Returns serialized SvmAccount data via out-pointers, or QUASAR_ERR_EXECUTION if not found.
+/// Returns serialized Account data via out-pointers, or QUASAR_ERR_EXECUTION if not found.
 #[unsafe(no_mangle)]
 pub extern "C" fn quasar_svm_get_account(
     svm: *const QuasarSvm,
@@ -403,9 +403,9 @@ pub extern "C" fn quasar_svm_simulate_transaction(
             }
         };
 
-        let svm_accounts: Vec<SvmAccount> = accts
+        let svm_accounts: Vec<Account> = accts
             .into_iter()
-            .map(|(pk, a)| SvmAccount::from_pair(pk, a))
+            .map(|(pk, a)| Account::from_pair(pk, a))
             .collect();
 
         let exec_result = svm.simulate_instruction_chain(&ixs, &svm_accounts);
@@ -464,9 +464,9 @@ pub extern "C" fn quasar_svm_process_transaction(
             }
         };
 
-        let svm_accounts: Vec<SvmAccount> = accts
+        let svm_accounts: Vec<Account> = accts
             .into_iter()
-            .map(|(pk, a)| SvmAccount::from_pair(pk, a))
+            .map(|(pk, a)| Account::from_pair(pk, a))
             .collect();
 
         let exec_result = svm.process_instruction_chain(&ixs, &svm_accounts);

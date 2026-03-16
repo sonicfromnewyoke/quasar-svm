@@ -2,7 +2,7 @@ import { getAddressEncoder, getAddressDecoder } from "@solana/addresses";
 import type { AccountMeta } from "@solana/instructions";
 import { isSignerRole, isWritableRole } from "@solana/instructions";
 import type { Instruction } from "@solana/instructions";
-import type { SvmAccount } from "./types.js";
+import type { Account } from "./types.js";
 import type { AccountDiff, ExecutionStatus } from "../index.js";
 import { programErrorFromStatus } from "../index.js";
 
@@ -52,7 +52,7 @@ export function serializeInstructions(ixs: Instruction[]): Buffer {
   return buf;
 }
 
-export function serializeAccounts(accounts: SvmAccount[]): Buffer {
+export function serializeAccounts(accounts: Account[]): Buffer {
   let total = 4;
   for (const a of accounts) total += 32 + 32 + 8 + 4 + a.data.length + 1;
 
@@ -102,8 +102,8 @@ export function deserializeResult(data: Buffer): {
   computeUnits: bigint;
   executionTimeUs: bigint;
   returnData: Uint8Array;
-  accounts: SvmAccount[];
-  modifiedAccounts: AccountDiff<SvmAccount>[];
+  accounts: Account[];
+  modifiedAccounts: AccountDiff<Account>[];
   logs: string[];
 } {
   let o = 0;
@@ -122,15 +122,15 @@ export function deserializeResult(data: Buffer): {
 
   const numAccts = data.readUInt32LE(o);
   o += 4;
-  const accounts: SvmAccount[] = [];
+  const accounts: Account[] = [];
   for (let i = 0; i < numAccts; i++) {
     const address = addressDecoder.decode(data.subarray(o, o + 32));
     o += 32;
     const fields = readAccountFields(data, o);
     o = fields.offset;
     accounts.push({
-      address: address as SvmAccount["address"],
-      owner: fields.owner as SvmAccount["owner"],
+      address: address as Account["address"],
+      owner: fields.owner as Account["owner"],
       lamports: fields.lamports,
       data: fields.data,
       executable: fields.executable,
@@ -155,7 +155,7 @@ export function deserializeResult(data: Buffer): {
   // Modified accounts (account diffs)
   const numDiffs = data.readUInt32LE(o);
   o += 4;
-  const modifiedAccounts: AccountDiff<SvmAccount>[] = [];
+  const modifiedAccounts: AccountDiff<Account>[] = [];
   for (let i = 0; i < numDiffs; i++) {
     const diffAddress = addressDecoder.decode(data.subarray(o, o + 32));
     o += 32;
@@ -164,17 +164,17 @@ export function deserializeResult(data: Buffer): {
     const post = readAccountFields(data, o);
     o = post.offset;
     modifiedAccounts.push({
-      address: diffAddress as SvmAccount["address"],
+      address: diffAddress as Account["address"],
       pre: {
-        address: diffAddress as SvmAccount["address"],
-        owner: pre.owner as SvmAccount["owner"],
+        address: diffAddress as Account["address"],
+        owner: pre.owner as Account["owner"],
         lamports: pre.lamports,
         data: pre.data,
         executable: pre.executable,
       },
       post: {
-        address: diffAddress as SvmAccount["address"],
-        owner: post.owner as SvmAccount["owner"],
+        address: diffAddress as Account["address"],
+        owner: post.owner as Account["owner"],
         lamports: post.lamports,
         data: post.data,
         executable: post.executable,

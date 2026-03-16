@@ -70,7 +70,8 @@
 //!   [1]  executable
 //! ```
 
-use quasar_svm::{Account, AccountDiff, ExecutionResult, Instruction, Pubkey, SvmAccount};
+use quasar_svm::{Account, AccountDiff, ExecutionResult, Instruction, Pubkey};
+use solana_account::Account as SolanaAccount;
 use solana_instruction::AccountMeta;
 use solana_program_error::ProgramError;
 
@@ -216,7 +217,7 @@ pub fn deserialize_instructions(data: &[u8]) -> Result<Vec<Instruction>, &'stati
 }
 
 /// Deserialize a count-prefixed list of accounts from the wire format.
-pub fn deserialize_accounts(data: &[u8]) -> Result<Vec<(Pubkey, Account)>, &'static str> {
+pub fn deserialize_accounts(data: &[u8]) -> Result<Vec<(Pubkey, SolanaAccount)>, &'static str> {
     let mut r = Reader::new(data);
     let count = r.read_u32()? as usize;
     let mut accounts = Vec::with_capacity(count);
@@ -229,7 +230,7 @@ pub fn deserialize_accounts(data: &[u8]) -> Result<Vec<(Pubkey, Account)>, &'sta
         let executable = r.read_bool()?;
         accounts.push((
             pubkey,
-            Account {
+            SolanaAccount {
                 lamports,
                 data,
                 owner,
@@ -279,9 +280,9 @@ fn program_error_to_i32(err: &ProgramError) -> i32 {
     }
 }
 
-/// Serialize a single SvmAccount for the `get_account` FFI call.
+/// Serialize a single Account for the `get_account` FFI call.
 /// Format: [32] pubkey [32] owner [8] lamports [4] data_len [N] data [1] executable
-pub fn serialize_single_account(account: &SvmAccount) -> Box<[u8]> {
+pub fn serialize_single_account(account: &Account) -> Box<[u8]> {
     let mut w = Writer::new();
     w.write_pubkey(&account.address);
     w.write_pubkey(&account.owner);
@@ -355,8 +356,8 @@ fn write_modified_accounts(w: &mut Writer, diffs: &[AccountDiff]) {
     }
 }
 
-/// Write the fields of an SvmAccount (owner, lamports, data, executable) — no address.
-fn write_svm_account_fields(w: &mut Writer, account: &SvmAccount) {
+/// Write the fields of an Account (owner, lamports, data, executable) — no address.
+fn write_svm_account_fields(w: &mut Writer, account: &Account) {
     w.write_pubkey(&account.owner);
     w.write_u64(account.lamports);
     w.write_length_prefixed(&account.data);

@@ -4,7 +4,6 @@ mod svm;
 mod sysvars;
 pub mod token;
 
-pub use solana_account::Account;
 pub use solana_clock::Clock;
 pub use solana_instruction::{AccountMeta, Instruction};
 pub use solana_instruction_error::InstructionError;
@@ -22,11 +21,11 @@ pub use crate::sysvars::Sysvars;
 pub use std::collections::HashMap;
 
 // ---------------------------------------------------------------------------
-// SvmAccount
+// Account
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SvmAccount {
+pub struct Account {
     pub address: Pubkey,
     pub lamports: u64,
     pub data: Vec<u8>,
@@ -34,8 +33,8 @@ pub struct SvmAccount {
     pub executable: bool,
 }
 
-impl SvmAccount {
-    pub fn from_pair(address: Pubkey, account: Account) -> Self {
+impl Account {
+    pub fn from_pair(address: Pubkey, account: solana_account::Account) -> Self {
         Self {
             address,
             lamports: account.lamports,
@@ -45,10 +44,10 @@ impl SvmAccount {
         }
     }
 
-    pub fn to_pair(&self) -> (Pubkey, Account) {
+    pub fn to_pair(&self) -> (Pubkey, solana_account::Account) {
         (
             self.address,
-            Account {
+            solana_account::Account {
                 lamports: self.lamports,
                 data: self.data.clone(),
                 owner: self.owner,
@@ -66,8 +65,8 @@ impl SvmAccount {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AccountDiff {
     pub address: Pubkey,
-    pub pre: SvmAccount,
-    pub post: SvmAccount,
+    pub pre: Account,
+    pub post: Account,
 }
 
 // ---------------------------------------------------------------------------
@@ -123,7 +122,7 @@ impl QuasarSvm {
     }
 
     /// Pre-populate an account in the SVM's account database.
-    pub fn with_account(mut self, account: SvmAccount) -> Self {
+    pub fn with_account(mut self, account: Account) -> Self {
         self.set_account(account);
         self
     }
@@ -199,7 +198,7 @@ impl ExecutionResult {
     }
 
     /// Look up a resulting account by address.
-    pub fn account(&self, address: &Pubkey) -> Option<&SvmAccount> {
+    pub fn account(&self, address: &Pubkey) -> Option<&Account> {
         self.accounts.iter().find(|a| a.address == *address)
     }
 

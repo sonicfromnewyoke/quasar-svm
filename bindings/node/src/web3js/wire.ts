@@ -1,5 +1,5 @@
 import { type TransactionInstruction, PublicKey } from "@solana/web3.js";
-import type { SvmAccount } from "./types.js";
+import type { KeyedAccount } from "./types.js";
 import type { AccountDiff, ExecutionStatus } from "../index.js";
 import { programErrorFromStatus } from "../index.js";
 
@@ -46,7 +46,7 @@ export function serializeInstructions(ixs: TransactionInstruction[]): Buffer {
   return buf;
 }
 
-export function serializeAccounts(accounts: SvmAccount[]): Buffer {
+export function serializeAccounts(accounts: KeyedAccount[]): Buffer {
   let total = 4;
   for (const a of accounts) total += 32 + 32 + 8 + 4 + a.data.length + 1;
 
@@ -96,8 +96,8 @@ export function deserializeResult(data: Buffer): {
   computeUnits: bigint;
   executionTimeUs: bigint;
   returnData: Uint8Array;
-  accounts: SvmAccount[];
-  modifiedAccounts: AccountDiff<SvmAccount>[];
+  accounts: KeyedAccount[];
+  modifiedAccounts: AccountDiff<KeyedAccount>[];
   logs: string[];
 } {
   let o = 0;
@@ -116,7 +116,7 @@ export function deserializeResult(data: Buffer): {
 
   const numAccts = data.readUInt32LE(o);
   o += 4;
-  const accounts: SvmAccount[] = [];
+  const accounts: KeyedAccount[] = [];
   for (let i = 0; i < numAccts; i++) {
     const address = new PublicKey(data.subarray(o, o + 32));
     o += 32;
@@ -143,7 +143,7 @@ export function deserializeResult(data: Buffer): {
   // Modified accounts (account diffs)
   const numDiffs = data.readUInt32LE(o);
   o += 4;
-  const modifiedAccounts: AccountDiff<SvmAccount>[] = [];
+  const modifiedAccounts: AccountDiff<KeyedAccount>[] = [];
   for (let i = 0; i < numDiffs; i++) {
     const diffAddress = new PublicKey(data.subarray(o, o + 32));
     o += 32;

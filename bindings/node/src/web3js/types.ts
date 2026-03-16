@@ -2,7 +2,7 @@ import { PublicKey } from "@solana/web3.js";
 import type { KeyedAccountInfo } from "@solana/web3.js";
 import type { ExecutionResult } from "../result.js";
 
-export interface SvmAccount {
+export interface KeyedAccount {
   address: PublicKey;
   lamports: bigint;
   data: Buffer;
@@ -10,9 +10,9 @@ export interface SvmAccount {
   executable: boolean;
 }
 
-export type Web3ExecutionResult = ExecutionResult<SvmAccount, PublicKey>;
+export type Web3ExecutionResult = ExecutionResult<KeyedAccount, PublicKey>;
 
-export function toKeyedAccountInfo(account: SvmAccount): KeyedAccountInfo {
+export function toKeyedAccountInfo(account: KeyedAccount): KeyedAccountInfo {
   return {
     accountId: account.address,
     accountInfo: {
@@ -24,7 +24,7 @@ export function toKeyedAccountInfo(account: SvmAccount): KeyedAccountInfo {
   };
 }
 
-export function fromKeyedAccountInfo(keyed: KeyedAccountInfo): SvmAccount {
+export function fromKeyedAccountInfo(keyed: KeyedAccountInfo): KeyedAccount {
   return {
     address: keyed.accountId,
     lamports: BigInt(keyed.accountInfo.lamports),

@@ -7,7 +7,7 @@ use agave_feature_set::FeatureSet;
 use agave_syscalls::{
     create_program_runtime_environment_v1, create_program_runtime_environment_v2,
 };
-use solana_account::{Account, AccountSharedData, ReadableAccount, WritableAccount};
+use solana_account::{Account as SolanaAccount, AccountSharedData, ReadableAccount, WritableAccount};
 use solana_compute_budget::compute_budget::ComputeBudget;
 use solana_hash::Hash;
 use solana_instruction::{BorrowedAccountMeta, BorrowedInstruction, Instruction};
@@ -24,10 +24,12 @@ use solana_svm_timings::ExecuteTimings;
 use solana_svm_transaction::instruction::SVMInstruction;
 use solana_transaction_context::{IndexOfAccount, TransactionContext};
 
+use spl_token::state::{Account as SplTokenAccount, Mint as SplMint};
+use solana_program_pack::Pack;
+
 use crate::program_cache::ProgramCache;
 use crate::sysvars::Sysvars;
-use crate::token::{Mint, Token};
-use crate::{AccountDiff, SvmAccount};
+use crate::{Account, AccountDiff};
 
 struct NoOpCallback;
 
@@ -56,7 +58,7 @@ pub struct ExecutionResult {
     pub execution_time_us: u64,
     pub raw_result: Result<(), InstructionError>,
     pub return_data: Vec<u8>,
-    pub accounts: Vec<SvmAccount>,
+    pub accounts: Vec<Account>,
     pub modified_accounts: Vec<AccountDiff>,
     pub logs: Vec<String>,
 }
@@ -67,7 +69,7 @@ pub struct QuasarSvm {
     pub logger: Option<Rc<RefCell<LogCollector>>>,
     pub program_cache: ProgramCache,
     pub sysvars: Sysvars,
-    accounts: HashMap<Pubkey, Account>,
+    accounts: HashMap<Pubkey, SolanaAccount>,
 }
 
 impl Default for QuasarSvm {
@@ -98,16 +100,16 @@ impl QuasarSvm {
 
     /// Store an account in the SVM's account database.
     /// Stored accounts are automatically included when processing transactions.
-    pub fn set_account(&mut self, account: SvmAccount) {
+    pub fn set_account(&mut self, account: Account) {
         let (pubkey, acct) = account.to_pair();
         self.accounts.insert(pubkey, acct);
     }
 
     /// Read an account from the SVM's account database.
-    pub fn get_account(&self, pubkey: &Pubkey) -> Option<SvmAccount> {
+    pub fn get_account(&self, pubkey: &Pubkey) -> Option<Account> {
         self.accounts
             .get(pubkey)
-            .map(|a| SvmAccount::from_pair(*pubkey, a.clone()))
+            .map(|a| Account::from_pair(*pubkey, a.clone()))
     }
 
     /// Give lamports to an account, creating it if it doesn't exist.
@@ -115,7 +117,7 @@ impl QuasarSvm {
     pub fn airdrop(&mut self, pubkey: &Pubkey, lamports: u64) {
         let existing = self.accounts.get(pubkey);
         let new_lamports = existing.map_or(lamports, |a| a.lamports + lamports);
-        let account = Account {
+        let account = SolanaAccount {
             lamports: new_lamports,
             data: existing.map_or_else(Vec::new, |a| a.data.clone()),
             owner: existing.map_or(solana_sdk_ids::system_program::ID, |a| a.owner),
@@ -128,7 +130,7 @@ impl QuasarSvm {
     /// Create a rent-exempt account with the given space and owner.
     pub fn create_account(&mut self, pubkey: &Pubkey, space: usize, owner: &Pubkey) {
         let lamports = self.sysvars.rent.minimum_balance(space);
-        let account = Account {
+        let account = SolanaAccount {
             lamports,
             data: vec![0u8; space],
             owner: *owner,
@@ -145,10 +147,10 @@ impl QuasarSvm {
             .accounts
             .get_mut(address)
             .unwrap_or_else(|| panic!("set_token_balance: account {address} not found"));
-        let mut token = Token::unpack(&acct.data)
-            .unwrap_or_else(|| panic!("set_token_balance: account {address} is not a valid token account"));
+        let mut token = SplTokenAccount::unpack(&acct.data)
+            .unwrap_or_else(|_| panic!("set_token_balance: account {address} is not a valid token account"));
         token.amount = amount;
-        acct.data = token.pack();
+        SplTokenAccount::pack(token, &mut acct.data).unwrap();
     }
 
     /// Set the supply of an existing mint account in the store.
@@ -158,10 +160,10 @@ impl QuasarSvm {
             .accounts
             .get_mut(address)
             .unwrap_or_else(|| panic!("set_mint_supply: account {address} not found"));
-        let mut mint = Mint::unpack(&acct.data)
-            .unwrap_or_else(|| panic!("set_mint_supply: account {address} is not a valid mint account"));
+        let mut mint = SplMint::unpack(&acct.data)
+            .unwrap_or_else(|_| panic!("set_mint_supply: account {address} is not a valid mint account"));
         mint.supply = supply;
-        acct.data = mint.pack();
+        SplMint::pack(mint, &mut acct.data).unwrap();
     }
 
     /// Set the clock's unix_timestamp only.
@@ -173,7 +175,7 @@ impl QuasarSvm {
     pub fn simulate_instruction(
         &mut self,
         instruction: &Instruction,
-        accounts: &[SvmAccount],
+        accounts: &[Account],
     ) -> ExecutionResult {
         self.execute_inner(std::slice::from_ref(instruction), accounts, false)
     }
@@ -182,7 +184,7 @@ impl QuasarSvm {
     pub fn simulate_instruction_chain(
         &mut self,
         instructions: &[Instruction],
-        accounts: &[SvmAccount],
+        accounts: &[Account],
     ) -> ExecutionResult {
         self.execute_inner(instructions, accounts, false)
     }
@@ -192,7 +194,7 @@ impl QuasarSvm {
     pub fn process_instruction(
         &mut self,
         instruction: &Instruction,
-        accounts: &[SvmAccount],
+        accounts: &[Account],
     ) -> ExecutionResult {
         self.execute_inner(std::slice::from_ref(instruction), accounts, true)
     }
@@ -202,7 +204,7 @@ impl QuasarSvm {
     pub fn process_instruction_chain(
         &mut self,
         instructions: &[Instruction],
-        accounts: &[SvmAccount],
+        accounts: &[Account],
     ) -> ExecutionResult {
         self.execute_inner(instructions, accounts, true)
     }
@@ -210,17 +212,17 @@ impl QuasarSvm {
     fn execute_inner(
         &mut self,
         instructions: &[Instruction],
-        accounts: &[SvmAccount],
+        accounts: &[Account],
         commit: bool,
     ) -> ExecutionResult {
         self.reset_logger();
 
-        let pairs: Vec<(Pubkey, Account)> = accounts.iter().map(|a| a.to_pair()).collect();
+        let pairs: Vec<(Pubkey, SolanaAccount)> = accounts.iter().map(|a| a.to_pair()).collect();
         let merged = self.merge_accounts(&pairs);
 
-        let pre_accounts: HashMap<Pubkey, SvmAccount> = merged
+        let pre_accounts: HashMap<Pubkey, Account> = merged
             .iter()
-            .map(|(k, v)| (*k, SvmAccount::from_pair(*k, v.clone())))
+            .map(|(k, v)| (*k, Account::from_pair(*k, v.clone())))
             .collect();
 
         let (sanitized_message, transaction_accounts) =
@@ -266,9 +268,9 @@ impl QuasarSvm {
 
     /// Merge explicit accounts with the stored account database.
     /// Explicit accounts take priority over stored ones.
-    fn merge_accounts(&self, accounts: &[(Pubkey, Account)]) -> Vec<(Pubkey, Account)> {
+    fn merge_accounts(&self, accounts: &[(Pubkey, SolanaAccount)]) -> Vec<(Pubkey, SolanaAccount)> {
         let explicit: HashSet<Pubkey> = accounts.iter().map(|(k, _)| *k).collect();
-        let mut merged: Vec<(Pubkey, Account)> = self
+        let mut merged: Vec<(Pubkey, SolanaAccount)> = self
             .accounts
             .iter()
             .filter(|(k, _)| !explicit.contains(k))
@@ -279,7 +281,7 @@ impl QuasarSvm {
     }
 
     /// Write resulting accounts back into the stored account database.
-    fn commit_accounts(&mut self, resulting: &[(Pubkey, Account)]) {
+    fn commit_accounts(&mut self, resulting: &[(Pubkey, SolanaAccount)]) {
         for (pubkey, account) in resulting {
             self.accounts.insert(*pubkey, account.clone());
         }
@@ -297,7 +299,7 @@ impl QuasarSvm {
     }
 
     /// Build the instructions sysvar account.
-    fn build_instructions_sysvar(instructions: &[Instruction]) -> (Pubkey, Account) {
+    fn build_instructions_sysvar(instructions: &[Instruction]) -> (Pubkey, SolanaAccount) {
         let data = construct_instructions_data(
             instructions
                 .iter()
@@ -319,7 +321,7 @@ impl QuasarSvm {
         );
         (
             solana_instructions_sysvar::ID,
-            Account {
+            SolanaAccount {
                 lamports: 0,
                 data,
                 owner: solana_sysvar_id::ID,
@@ -333,7 +335,7 @@ impl QuasarSvm {
     fn compile_accounts(
         &self,
         instructions: &[Instruction],
-        accounts: &[(Pubkey, Account)],
+        accounts: &[(Pubkey, SolanaAccount)],
     ) -> (SanitizedMessage, Vec<(Pubkey, AccountSharedData)>) {
         let message = Message::new(instructions, None);
         let sanitized_message =
@@ -349,7 +351,7 @@ impl QuasarSvm {
             if !account_keys.contains(pid) {
                 let program_accounts = self.program_cache.maybe_create_program_accounts(pid);
                 if program_accounts.is_empty() {
-                    let mut stub = Account::default();
+                    let mut stub = SolanaAccount::default();
                     stub.set_executable(true);
                     fallbacks.insert(*pid, stub);
                 } else {
@@ -397,8 +399,8 @@ impl QuasarSvm {
 
     fn deconstruct_resulting_accounts(
         transaction_context: &TransactionContext,
-        original_accounts: &[(Pubkey, Account)],
-    ) -> Vec<(Pubkey, Account)> {
+        original_accounts: &[(Pubkey, SolanaAccount)],
+    ) -> Vec<(Pubkey, SolanaAccount)> {
         original_accounts
             .iter()
             .map(|(pubkey, account)| {
@@ -406,7 +408,7 @@ impl QuasarSvm {
                     .find_index_of_account(pubkey)
                     .map(|index| {
                         let account_ref = transaction_context.accounts().try_borrow(index).unwrap();
-                        let resulting_account = Account {
+                        let resulting_account = SolanaAccount {
                             lamports: account_ref.lamports(),
                             data: account_ref.data().to_vec(),
                             owner: *account_ref.owner(),
@@ -420,23 +422,23 @@ impl QuasarSvm {
             .collect()
     }
 
-    /// Convert a list of (Pubkey, Account) pairs to Vec<SvmAccount>.
-    fn pairs_to_svm_accounts(pairs: &[(Pubkey, Account)]) -> Vec<SvmAccount> {
+    /// Convert a list of (Pubkey, SolanaAccount) pairs to Vec<Account>.
+    fn pairs_to_svm_accounts(pairs: &[(Pubkey, SolanaAccount)]) -> Vec<Account> {
         pairs
             .iter()
-            .map(|(k, v)| SvmAccount::from_pair(*k, v.clone()))
+            .map(|(k, v)| Account::from_pair(*k, v.clone()))
             .collect()
     }
 
     /// Compute byte-level diffs between pre-execution and post-execution account states.
     fn compute_diffs(
-        pre: &HashMap<Pubkey, SvmAccount>,
-        post: &[(Pubkey, Account)],
+        pre: &HashMap<Pubkey, Account>,
+        post: &[(Pubkey, SolanaAccount)],
     ) -> Vec<AccountDiff> {
         let mut diffs = Vec::new();
         for (pubkey, post_account) in post {
             if let Some(pre_account) = pre.get(pubkey) {
-                let post_svm = SvmAccount::from_pair(*pubkey, post_account.clone());
+                let post_svm = Account::from_pair(*pubkey, post_account.clone());
                 if pre_account.lamports != post_svm.lamports
                     || pre_account.data != post_svm.data
                     || pre_account.owner != post_svm.owner

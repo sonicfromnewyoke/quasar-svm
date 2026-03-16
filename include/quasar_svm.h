@@ -58,7 +58,7 @@ int32_t quasar_svm_set_compute_budget(QuasarSvm *svm, uint64_t max_units);
 
 /**
  * Store an account in the SVM's account database.
- * The account is provided as raw fields (SvmAccount-style).
+ * The account is provided as raw fields (Account-style).
  */
 int32_t quasar_svm_set_account(QuasarSvm *svm,
                                const uint8_t (*pubkey)[32],
@@ -70,7 +70,7 @@ int32_t quasar_svm_set_account(QuasarSvm *svm,
 
 /**
  * Read an account from the SVM's account database.
- * Returns serialized SvmAccount data via out-pointers, or QUASAR_ERR_EXECUTION if not found.
+ * Returns serialized Account data via out-pointers, or QUASAR_ERR_EXECUTION if not found.
  */
 int32_t quasar_svm_get_account(const QuasarSvm *svm,
                                const uint8_t (*pubkey)[32],

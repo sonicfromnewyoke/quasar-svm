@@ -1,5 +1,6 @@
 import { PublicKey } from "@solana/web3.js";
 import type { TransactionInstruction } from "@solana/web3.js";
+import type { Address } from "@solana/addresses";
 import * as ffi from "../ffi.js";
 import {
   serializeInstructions,
@@ -8,7 +9,7 @@ import {
 } from "./wire.js";
 import { ExecutionResult } from "../result.js";
 import { QuasarSvmBase } from "../base.js";
-import type { SvmAccount, Web3ExecutionResult } from "./types.js";
+import type { KeyedAccount, Web3ExecutionResult } from "./types.js";
 import { uniqueAddress } from "../address.js";
 import {
   SPL_TOKEN_PROGRAM_ID,
@@ -21,16 +22,15 @@ import {
 } from "../programs.js";
 import {
   packMint, packTokenAccount, rentMinimumBalance,
-  tokenTransferData, tokenMintToData, tokenBurnData,
   MINT_LEN, TOKEN_ACCOUNT_LEN,
 } from "../token.js";
 import type { TokenAccountState } from "../token.js";
 
-export type { SvmAccount, Web3ExecutionResult } from "./types.js";
+export type { KeyedAccount, Web3ExecutionResult } from "./types.js";
 export { toKeyedAccountInfo, fromKeyedAccountInfo } from "./types.js";
 export { ExecutionResult } from "../result.js";
 export type { ExecutionStatus, ProgramError, AccountDiff, Clock, EpochSchedule } from "../index.js";
-export { SPL_TOKEN_PROGRAM_ID, SPL_TOKEN_2022_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID, LOADER_V2, LOADER_V3, LAMPORTS_PER_SOL, sol, tokens } from "../programs.js";
+export { SPL_TOKEN_PROGRAM_ID, SPL_TOKEN_2022_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID, LOADER_V2, LOADER_V3, LAMPORTS_PER_SOL } from "../programs.js";
 export { TokenAccountState } from "../token.js";
 import type { Mint as _Mint, Token as _Token } from "../result.js";
 export type Mint = _Mint<PublicKey>;
@@ -62,7 +62,7 @@ export interface TokenAccountOpts {
 // QuasarSvm
 // ---------------------------------------------------------------------------
 
-const findAccount = (accounts: SvmAccount[], address: PublicKey) =>
+const findAccount = (accounts: KeyedAccount[], address: PublicKey) =>
   accounts.find(a => a.address.equals(address));
 
 const decodeAddress = (bytes: Uint8Array) => new PublicKey(bytes);
@@ -95,7 +95,7 @@ export class QuasarSvm extends QuasarSvmBase {
 
   // ---------- Account store ----------
 
-  setAccount(account: SvmAccount): void {
+  setAccount(account: KeyedAccount): void {
     const dataBuf = account.data.length > 0 ? Buffer.from(account.data) : null;
     this.check(
       ffi.quasar_svm_set_account(
@@ -110,7 +110,7 @@ export class QuasarSvm extends QuasarSvmBase {
     );
   }
 
-  getAccount(pubkey: PublicKey): SvmAccount | null {
+  getAccount(pubkey: PublicKey): KeyedAccount | null {
     const ptrOut = [null as unknown];
     const lenOut = [BigInt(0)];
     const code = ffi.quasar_svm_get_account(this.ptr, pubkey.toBuffer(), ptrOut, lenOut);
@@ -159,19 +159,19 @@ export class QuasarSvm extends QuasarSvmBase {
 
   // ---------- Execution ----------
 
-  processInstruction(instruction: TransactionInstruction, accounts: SvmAccount[]): Web3ExecutionResult {
+  processInstruction(instruction: TransactionInstruction, accounts: KeyedAccount[]): Web3ExecutionResult {
     return this.exec(ffi.quasar_svm_process_transaction, serializeInstructions([instruction]), serializeAccounts(accounts));
   }
 
-  processInstructionChain(instructions: TransactionInstruction[], accounts: SvmAccount[]): Web3ExecutionResult {
+  processInstructionChain(instructions: TransactionInstruction[], accounts: KeyedAccount[]): Web3ExecutionResult {
     return this.exec(ffi.quasar_svm_process_transaction, serializeInstructions(instructions), serializeAccounts(accounts));
   }
 
-  simulateInstruction(instruction: TransactionInstruction, accounts: SvmAccount[]): Web3ExecutionResult {
+  simulateInstruction(instruction: TransactionInstruction, accounts: KeyedAccount[]): Web3ExecutionResult {
     return this.exec(ffi.quasar_svm_simulate_transaction, serializeInstructions([instruction]), serializeAccounts(accounts));
   }
 
-  simulateInstructionChain(instructions: TransactionInstruction[], accounts: SvmAccount[]): Web3ExecutionResult {
+  simulateInstructionChain(instructions: TransactionInstruction[], accounts: KeyedAccount[]): Web3ExecutionResult {
     return this.exec(ffi.quasar_svm_simulate_transaction, serializeInstructions(instructions), serializeAccounts(accounts));
   }
 
@@ -188,9 +188,9 @@ export class QuasarSvm extends QuasarSvmBase {
 // ---------------------------------------------------------------------------
 
 /** Create a system-owned account with the given lamports. Address auto-generated if omitted. */
-export function createSystemAccount(lamports: bigint): SvmAccount;
-export function createSystemAccount(address: PublicKey, lamports: bigint): SvmAccount;
-export function createSystemAccount(addressOrLamports: PublicKey | bigint, lamports?: bigint): SvmAccount {
+export function createSystemAccount(lamports: bigint): KeyedAccount;
+export function createSystemAccount(address: PublicKey, lamports: bigint): KeyedAccount;
+export function createSystemAccount(addressOrLamports: PublicKey | bigint, lamports?: bigint): KeyedAccount {
   let addr: PublicKey;
   let lamps: bigint;
   if (addressOrLamports instanceof PublicKey) {
@@ -210,13 +210,13 @@ export function createSystemAccount(addressOrLamports: PublicKey | bigint, lampo
 }
 
 /** Create a pre-initialized mint account. Address auto-generated if omitted. */
-export function createMintAccount(opts?: MintOpts, tokenProgramId?: PublicKey): SvmAccount;
-export function createMintAccount(address: PublicKey, opts?: MintOpts, tokenProgramId?: PublicKey): SvmAccount;
+export function createMintAccount(opts?: MintOpts, tokenProgramId?: PublicKey): KeyedAccount;
+export function createMintAccount(address: PublicKey, opts?: MintOpts, tokenProgramId?: PublicKey): KeyedAccount;
 export function createMintAccount(
   first?: PublicKey | MintOpts,
   second?: MintOpts | PublicKey,
   third?: PublicKey,
-): SvmAccount {
+): KeyedAccount {
   let addr: PublicKey;
   let opts: MintOpts;
   let programId: PublicKey;
@@ -231,12 +231,13 @@ export function createMintAccount(
     programId = second instanceof PublicKey ? second : new PublicKey(SPL_TOKEN_PROGRAM_ID);
   }
 
-  const data = packMint({
-    mintAuthority: opts.mintAuthority?.toBuffer(),
-    supply: opts.supply,
-    decimals: opts.decimals,
-    freezeAuthority: opts.freezeAuthority?.toBuffer(),
-  });
+  const data = Buffer.from(packMint({
+    mintAuthority: opts.mintAuthority ? opts.mintAuthority.toBase58() as Address : null,
+    supply: opts.supply ?? 0n,
+    decimals: opts.decimals ?? 9,
+    isInitialized: true,
+    freezeAuthority: opts.freezeAuthority ? opts.freezeAuthority.toBase58() as Address : null,
+  }));
   return {
     address: addr,
     owner: programId,
@@ -247,13 +248,13 @@ export function createMintAccount(
 }
 
 /** Create a pre-initialized token account. Address auto-generated if omitted. */
-export function createTokenAccount(opts: TokenAccountOpts, tokenProgramId?: PublicKey): SvmAccount;
-export function createTokenAccount(address: PublicKey, opts: TokenAccountOpts, tokenProgramId?: PublicKey): SvmAccount;
+export function createTokenAccount(opts: TokenAccountOpts, tokenProgramId?: PublicKey): KeyedAccount;
+export function createTokenAccount(address: PublicKey, opts: TokenAccountOpts, tokenProgramId?: PublicKey): KeyedAccount;
 export function createTokenAccount(
   first: PublicKey | TokenAccountOpts,
   second?: TokenAccountOpts | PublicKey,
   third?: PublicKey,
-): SvmAccount {
+): KeyedAccount {
   let addr: PublicKey;
   let opts: TokenAccountOpts;
   let programId: PublicKey;
@@ -268,16 +269,16 @@ export function createTokenAccount(
     programId = second instanceof PublicKey ? second : new PublicKey(SPL_TOKEN_PROGRAM_ID);
   }
 
-  const data = packTokenAccount({
-    mint: opts.mint.toBuffer(),
-    owner: opts.owner.toBuffer(),
+  const data = Buffer.from(packTokenAccount({
+    mint: opts.mint.toBase58() as Address,
+    owner: opts.owner.toBase58() as Address,
     amount: opts.amount,
-    delegate: opts.delegate?.toBuffer(),
-    state: opts.state,
-    isNative: opts.isNative,
-    delegatedAmount: opts.delegatedAmount,
-    closeAuthority: opts.closeAuthority?.toBuffer(),
-  });
+    delegate: opts.delegate ? opts.delegate.toBase58() as Address : null,
+    state: (opts.state ?? 1) as number,
+    isNative: opts.isNative ?? null,
+    delegatedAmount: opts.delegatedAmount ?? 0n,
+    closeAuthority: opts.closeAuthority ? opts.closeAuthority.toBase58() as Address : null,
+  }));
   return {
     address: addr,
     owner: programId,
@@ -293,16 +294,21 @@ export function createAssociatedTokenAccount(
   mint: PublicKey,
   amount: bigint,
   tokenProgramId = new PublicKey(SPL_TOKEN_PROGRAM_ID),
-): SvmAccount {
+): KeyedAccount {
   const [ata] = PublicKey.findProgramAddressSync(
     [owner.toBuffer(), tokenProgramId.toBuffer(), mint.toBuffer()],
     new PublicKey(SPL_ASSOCIATED_TOKEN_PROGRAM_ID),
   );
-  const data = packTokenAccount({
-    mint: mint.toBuffer(),
-    owner: owner.toBuffer(),
+  const data = Buffer.from(packTokenAccount({
+    mint: mint.toBase58() as Address,
+    owner: owner.toBase58() as Address,
     amount,
-  });
+    delegate: null,
+    state: 1,
+    isNative: null,
+    delegatedAmount: 0n,
+    closeAuthority: null,
+  }));
   return {
     address: ata,
     owner: tokenProgramId,
@@ -312,54 +318,3 @@ export function createAssociatedTokenAccount(
   };
 }
 
-// ---------------------------------------------------------------------------
-// Token instruction builders
-// ---------------------------------------------------------------------------
-
-/** Build an SPL Token Transfer instruction. */
-export function tokenTransfer(
-  source: PublicKey, destination: PublicKey, authority: PublicKey,
-  amount: bigint, tokenProgramId = new PublicKey(SPL_TOKEN_PROGRAM_ID),
-): TransactionInstruction {
-  return {
-    programId: tokenProgramId,
-    keys: [
-      { pubkey: source, isSigner: false, isWritable: true },
-      { pubkey: destination, isSigner: false, isWritable: true },
-      { pubkey: authority, isSigner: true, isWritable: false },
-    ],
-    data: tokenTransferData(amount),
-  };
-}
-
-/** Build an SPL Token MintTo instruction. */
-export function tokenMintTo(
-  mint: PublicKey, destination: PublicKey, mintAuthority: PublicKey,
-  amount: bigint, tokenProgramId = new PublicKey(SPL_TOKEN_PROGRAM_ID),
-): TransactionInstruction {
-  return {
-    programId: tokenProgramId,
-    keys: [
-      { pubkey: mint, isSigner: false, isWritable: true },
-      { pubkey: destination, isSigner: false, isWritable: true },
-      { pubkey: mintAuthority, isSigner: true, isWritable: false },
-    ],
-    data: tokenMintToData(amount),
-  };
-}
-
-/** Build an SPL Token Burn instruction. */
-export function tokenBurn(
-  source: PublicKey, mint: PublicKey, authority: PublicKey,
-  amount: bigint, tokenProgramId = new PublicKey(SPL_TOKEN_PROGRAM_ID),
-): TransactionInstruction {
-  return {
-    programId: tokenProgramId,
-    keys: [
-      { pubkey: source, isSigner: false, isWritable: true },
-      { pubkey: mint, isSigner: false, isWritable: true },
-      { pubkey: authority, isSigner: true, isWritable: false },
-    ],
-    data: tokenBurnData(amount),
-  };
-}
