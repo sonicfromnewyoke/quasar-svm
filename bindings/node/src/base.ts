@@ -5,6 +5,21 @@ const cleanupRegistry = new FinalizationRegistry((ptr: unknown) => {
   ffi.quasar_svm_free(ptr);
 });
 
+export interface QuasarSvmConfig {
+  /** Load SPL Token program (default: true) */
+  token?: boolean;
+  /** Load SPL Token-2022 program (default: true) */
+  token2022?: boolean;
+  /** Load SPL Associated Token Account program (default: true) */
+  associatedToken?: boolean;
+}
+
+export const QUASAR_SVM_CONFIG_FULL: QuasarSvmConfig = {
+  token: true,
+  token2022: true,
+  associatedToken: true
+}
+
 export abstract class QuasarSvmBase {
   protected ptr: unknown;
   private freed = false;
@@ -33,10 +48,6 @@ export abstract class QuasarSvmBase {
 
   // ---------- Sysvars ----------
 
-  warpToTimestamp(timestamp: bigint): void {
-    this.check(ffi.quasar_svm_warp_to_timestamp(this.ptr, timestamp));
-  }
-
   setClock(opts: Clock): void {
     this.check(
       ffi.quasar_svm_set_clock(
@@ -55,7 +66,7 @@ export abstract class QuasarSvmBase {
   }
 
   setRent(lamportsPerByte: bigint): void {
-    this.check(ffi.quasar_svm_set_rent(this.ptr, lamportsPerByte, 2.0, 50));
+    this.check(ffi.quasar_svm_set_rent(this.ptr, lamportsPerByte));
   }
 
   setEpochSchedule(opts: EpochSchedule): void {

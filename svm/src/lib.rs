@@ -16,7 +16,7 @@ pub use solana_sdk_ids::system_program;
 
 pub use crate::error::ProgramError;
 pub use crate::program_cache::loader_keys;
-pub use crate::svm::{ExecutionResult, QuasarSvm};
+pub use crate::svm::{ExecutionResult, QuasarSvm, QuasarSvmConfig};
 pub use crate::sysvars::Sysvars;
 pub use std::collections::HashMap;
 

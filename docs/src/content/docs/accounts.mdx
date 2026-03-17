@@ -1,0 +1,361 @@
+---
+title: Accounts
+description: Account types, factories, optional address pattern, and interop helpers
+---
+
+import { Tabs, TabItem } from "@astrojs/starlight/components";
+
+QuasarSVM uses `Account` as the universal account type. Account factory functions create `Account` values that are passed to execution.
+
+## Account Types
+
+Each layer has its own account type with the same shape:
+
+<Tabs>
+<TabItem label="Rust" icon="seti:rust">
+```rust
+pub struct Account {
+    pub address: Pubkey,
+    pub lamports: u64,
+    pub data: Vec<u8>,
+    pub owner: Pubkey,
+    pub executable: bool,
+}
+```
+</TabItem>
+<TabItem label="web3.js" icon="seti:typescript">
+```ts
+type KeyedAccountInfo = {
+  accountId: Address;
+  accountInfo: {
+    owner: Address;
+    lamports: number | bigint;
+    data: Buffer;
+    executable: boolean;
+  };
+};
+```
+</TabItem>
+<TabItem label="kit" icon="seti:typescript">
+```ts
+// Account<Uint8Array> from @solana/accounts
+type Account<TData = Uint8Array> = {
+  address: Address;
+  programAddress: Address;
+  lamports: Lamports;        // branded bigint from @solana/rpc-types
+  data: TData;
+  executable: boolean;
+  space: bigint;
+};
+```
+</TabItem>
+</Tabs>
+
+## Account Factories
+
+All factories return `Account` (Rust/kit) or `KeyedAccountInfo` (web3.js). The address is always the first parameter.
+
+### System Account
+
+Create a system-owned account with a SOL balance:
+
+<Tabs>
+<TabItem label="Rust" icon="seti:rust">
+```rust
+use quasar_svm::token::create_system_account;
+
+// Auto-generated address
+let account = create_system_account(1_000_000_000);
+
+// Explicit address
+let account = create_system_account_at(&pubkey, 1_000_000_000);
+```
+</TabItem>
+<TabItem label="web3.js" icon="seti:typescript">
+```ts
+import { createKeyedSystemAccount } from "@blueshift-gg/quasar-svm/web3.js";
+import { Address } from "@solana/web3.js";
+
+// Explicit address (required), lamports defaults to 1 SOL
+const account = createKeyedSystemAccount(address);
+
+// With explicit lamports
+const account = createKeyedSystemAccount(address, 1_000_000_000n);
+```
+</TabItem>
+<TabItem label="kit" icon="seti:typescript">
+```ts
+import { createKeyedSystemAccount } from "@blueshift-gg/quasar-svm/kit";
+
+// Lamports defaults to 1 SOL
+const account = createKeyedSystemAccount(address);
+
+// With explicit lamports
+const account = createKeyedSystemAccount(address, 1_000_000_000n);
+```
+</TabItem>
+</Tabs>
+
+### Mint Account
+
+Create a pre-initialized SPL Token mint:
+
+<Tabs>
+<TabItem label="Rust" icon="seti:rust">
+```rust
+use quasar_svm::token::{create_mint_account, create_mint_account_at, Mint};
+
+// Auto-generated address
+let account = create_mint_account(
+    &Mint { decimals: 6, supply: 10_000, ..Default::default() },
+    &SPL_TOKEN_PROGRAM_ID,
+);
+
+// Explicit address
+let account = create_mint_account_at(
+    &pubkey,
+    &Mint { decimals: 6, ..Default::default() },
+    &SPL_TOKEN_PROGRAM_ID,
+);
+
+// Token-2022
+let account = create_mint_account(
+    &Mint { decimals: 6, ..Default::default() },
+    &SPL_TOKEN_2022_PROGRAM_ID,
+);
+```
+</TabItem>
+<TabItem label="web3.js" icon="seti:typescript">
+```ts
+import { createKeyedMintAccount } from "@blueshift-gg/quasar-svm/web3.js";
+
+// Auto-generated address
+const account = createKeyedMintAccount({ decimals: 6 });
+const account = createKeyedMintAccount({ decimals: 6, supply: 10_000n });
+
+// Explicit address
+const account = createKeyedMintAccount(address, { decimals: 6 });
+
+// Token-2022
+const account = createKeyedMintAccount({ decimals: 6 }, TOKEN_2022_PROGRAM_ID);
+const account = createKeyedMintAccount(address, { decimals: 6 }, TOKEN_2022_PROGRAM_ID);
+```
+</TabItem>
+<TabItem label="kit" icon="seti:typescript">
+```ts
+import { createKeyedMintAccount } from "@blueshift-gg/quasar-svm/kit";
+
+const account = createKeyedMintAccount(address, { decimals: 6 });
+const account = createKeyedMintAccount(address, { decimals: 6, supply: 10_000n });
+
+// Token-2022
+const account = createKeyedMintAccount(address, { decimals: 6 }, TOKEN_2022_PROGRAM_ID);
+```
+</TabItem>
+</Tabs>
+
+### Token Account
+
+Create a pre-initialized token account:
+
+<Tabs>
+<TabItem label="Rust" icon="seti:rust">
+```rust
+use quasar_svm::token::{create_token_account, create_token_account_at, Token};
+
+// Auto-generated address
+let account = create_token_account(
+    &Token { mint, owner, amount: 5_000, ..Default::default() },
+    &SPL_TOKEN_PROGRAM_ID,
+);
+
+// Explicit address
+let account = create_token_account_at(
+    &pubkey,
+    &Token { mint, owner, amount: 5_000, ..Default::default() },
+    &SPL_TOKEN_PROGRAM_ID,
+);
+```
+</TabItem>
+<TabItem label="web3.js" icon="seti:typescript">
+```ts
+import { createKeyedTokenAccount } from "@blueshift-gg/quasar-svm/web3.js";
+
+// Auto-generated address
+const account = createKeyedTokenAccount({ mint, owner, amount: 5_000n });
+
+// Explicit address
+const account = createKeyedTokenAccount(address, { mint, owner, amount: 5_000n });
+
+// Token-2022
+const account = createKeyedTokenAccount({ mint, owner, amount: 5_000n }, TOKEN_2022_PROGRAM_ID);
+```
+</TabItem>
+<TabItem label="kit" icon="seti:typescript">
+```ts
+import { createKeyedTokenAccount } from "@blueshift-gg/quasar-svm/kit";
+
+const account = createKeyedTokenAccount(address, { mint, owner, amount: 5_000n });
+
+// Token-2022
+const account = createKeyedTokenAccount(address, { mint, owner, amount: 5_000n }, TOKEN_2022_PROGRAM_ID);
+```
+</TabItem>
+</Tabs>
+
+### Associated Token Account
+
+Derive the ATA address automatically and create a pre-initialized token account. The address is always derived (not optional).
+
+<Tabs>
+<TabItem label="Rust" icon="seti:rust">
+```rust
+use quasar_svm::token::create_associated_token_account;
+
+let account = create_associated_token_account(&wallet, &mint, 5_000, &SPL_TOKEN_PROGRAM_ID);
+// account.address is the derived ATA address
+
+// Token-2022
+let account = create_associated_token_account(&wallet, &mint, 5_000, &SPL_TOKEN_2022_PROGRAM_ID);
+```
+</TabItem>
+<TabItem label="web3.js" icon="seti:typescript">
+```ts
+import { createKeyedAssociatedTokenAccount } from "@blueshift-gg/quasar-svm/web3.js";
+
+const account = createKeyedAssociatedTokenAccount(owner, mint, 5_000n);
+account.accountId; // derived ATA address
+
+// Token-2022
+const account = createKeyedAssociatedTokenAccount(owner, mint, 5_000n, TOKEN_2022_PROGRAM_ID);
+```
+
+> Synchronous — uses `Address.findProgramAddressSync`.
+</TabItem>
+<TabItem label="kit" icon="seti:typescript">
+```ts
+import { createKeyedAssociatedTokenAccount } from "@blueshift-gg/quasar-svm/kit";
+
+// Async — PDA derivation in @solana/addresses is async
+const account = await createKeyedAssociatedTokenAccount(owner, mint, 5_000n);
+account.address; // derived ATA address
+
+const account = await createKeyedAssociatedTokenAccount(owner, mint, 5_000n, TOKEN_2022_PROGRAM_ID);
+```
+</TabItem>
+</Tabs>
+
+## Token-2022 Support
+
+All factories that create token-related accounts accept an optional `tokenProgramId` / `programId` parameter. Pass `SPL_TOKEN_2022_PROGRAM_ID` to create Token-2022 accounts:
+
+<Tabs>
+<TabItem label="Rust" icon="seti:rust">
+```rust
+let mint = create_mint_account(opts, &SPL_TOKEN_2022_PROGRAM_ID);
+let token = create_token_account(opts, &SPL_TOKEN_2022_PROGRAM_ID);
+let ata = create_associated_token_account(&wallet, &mint_addr, amount, &SPL_TOKEN_2022_PROGRAM_ID);
+```
+</TabItem>
+<TabItem label="web3.js" icon="seti:typescript">
+```ts
+const mint  = createKeyedMintAccount({ decimals: 6 }, TOKEN_2022_PROGRAM_ID);
+const token = createKeyedTokenAccount({ mint, owner, amount: 5_000n }, TOKEN_2022_PROGRAM_ID);
+const ata   = createKeyedAssociatedTokenAccount(owner, mint, 5_000n, TOKEN_2022_PROGRAM_ID);
+```
+</TabItem>
+<TabItem label="kit" icon="seti:typescript">
+```ts
+const mint  = createKeyedMintAccount(mintAddr, { decimals: 6 }, TOKEN_2022_PROGRAM_ID);
+const token = createKeyedTokenAccount(tokenAddr, { mint, owner, amount: 5_000n }, TOKEN_2022_PROGRAM_ID);
+const ata   = await createKeyedAssociatedTokenAccount(owner, mint, 5_000n, TOKEN_2022_PROGRAM_ID);
+```
+</TabItem>
+</Tabs>
+
+## Mint / MintArgs
+
+<Tabs>
+<TabItem label="Rust" icon="seti:rust">
+```rust
+pub struct Mint {
+    pub mint_authority: Option<Pubkey>,
+    pub supply: u64,
+    pub decimals: u8,
+    pub freeze_authority: Option<Pubkey>,
+}
+```
+</TabItem>
+<TabItem label="web3.js" icon="seti:typescript">
+```ts
+interface MintOpts {
+  mintAuthority?: Address;
+  supply?: bigint;
+  decimals?: number;         // default: 9
+  freezeAuthority?: Address;
+}
+```
+</TabItem>
+<TabItem label="kit" icon="seti:typescript">
+```ts
+// Partial<MintArgs> from @solana-program/token
+// All fields optional — defaults: decimals=9, supply=0, no authorities
+type MintArgs = {
+  mintAuthority: OptionOrNullable<Address>;
+  supply: number | bigint;
+  decimals: number;
+  isInitialized: boolean;
+  freezeAuthority: OptionOrNullable<Address>;
+};
+```
+</TabItem>
+</Tabs>
+
+## Token / TokenArgs
+
+<Tabs>
+<TabItem label="Rust" icon="seti:rust">
+```rust
+pub struct Token {
+    pub mint: Pubkey,
+    pub owner: Pubkey,
+    pub amount: u64,
+    pub delegate: Option<Pubkey>,
+    pub state: TokenAccountState,
+    pub is_native: Option<u64>,
+    pub delegated_amount: u64,
+    pub close_authority: Option<Pubkey>,
+}
+```
+</TabItem>
+<TabItem label="web3.js" icon="seti:typescript">
+```ts
+interface TokenAccountOpts {
+  mint: Address;
+  owner: Address;
+  amount: bigint;
+  delegate?: Address;
+  state?: TokenAccountState;       // default: Initialized
+  isNative?: bigint;
+  delegatedAmount?: bigint;
+  closeAuthority?: Address;
+}
+```
+</TabItem>
+<TabItem label="kit" icon="seti:typescript">
+```ts
+// Partial<TokenArgs> from @solana-program/token
+// mint, owner, amount required at runtime
+type TokenArgs = {
+  mint: Address;
+  owner: Address;
+  amount: number | bigint;
+  delegate: OptionOrNullable<Address>;
+  state: AccountState;
+  isNative: OptionOrNullable<number | bigint>;
+  delegatedAmount: number | bigint;
+  closeAuthority: OptionOrNullable<Address>;
+};
+```
+</TabItem>
+</Tabs>

@@ -1,12 +1,4 @@
-import type { Address } from "@solana/addresses";
-import type { ExecutionResult } from "../result.js";
-
-export interface Account {
-  address: Address;
-  lamports: bigint;
-  data: Uint8Array;
-  owner: Address;
-  executable: boolean;
-}
-
-export type KitExecutionResult = ExecutionResult<Account, Address>;
+export { ExecutionResult } from "./result.js";
+export type { Account } from "@solana/accounts";
+export type { Mint, Token } from "@solana-program/token";
+export { AccountState } from "@solana-program/token";

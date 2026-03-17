@@ -40,12 +40,7 @@ int32_t quasar_svm_set_clock(QuasarSvm *svm,
 
 int32_t quasar_svm_warp_to_slot(QuasarSvm *svm, uint64_t slot);
 
-int32_t quasar_svm_warp_to_timestamp(QuasarSvm *svm, int64_t timestamp);
-
-int32_t quasar_svm_set_rent(QuasarSvm *svm,
-                            uint64_t lamports_per_byte_year,
-                            double exemption_threshold,
-                            uint8_t burn_percent);
+int32_t quasar_svm_set_rent(QuasarSvm *svm, uint64_t lamports_per_byte_year);
 
 int32_t quasar_svm_set_epoch_schedule(QuasarSvm *svm,
                                       uint64_t slots_per_epoch,
@@ -55,63 +50,6 @@ int32_t quasar_svm_set_epoch_schedule(QuasarSvm *svm,
                                       uint64_t first_normal_slot);
 
 int32_t quasar_svm_set_compute_budget(QuasarSvm *svm, uint64_t max_units);
-
-/**
- * Store an account in the SVM's account database.
- * The account is provided as raw fields (Account-style).
- */
-int32_t quasar_svm_set_account(QuasarSvm *svm,
-                               const uint8_t (*pubkey)[32],
-                               const uint8_t (*owner)[32],
-                               uint64_t lamports,
-                               const uint8_t *data,
-                               uint64_t data_len,
-                               bool executable);
-
-/**
- * Read an account from the SVM's account database.
- * Returns serialized Account data via out-pointers, or QUASAR_ERR_EXECUTION if not found.
- */
-int32_t quasar_svm_get_account(const QuasarSvm *svm,
-                               const uint8_t (*pubkey)[32],
-                               uint8_t **result_out,
-                               uint64_t *result_len_out);
-
-/**
- * Give lamports to an account, creating it if needed (system program owned).
- */
-int32_t quasar_svm_airdrop(QuasarSvm *svm, const uint8_t (*pubkey)[32], uint64_t lamports);
-
-/**
- * Create a rent-exempt account with the given space and owner.
- */
-int32_t quasar_svm_create_account(QuasarSvm *svm,
-                                  const uint8_t (*pubkey)[32],
-                                  uint64_t space,
-                                  const uint8_t (*owner)[32]);
-
-/**
- * Set the token balance (amount) of an existing token account in the store.
- * Returns QUASAR_ERR_EXECUTION if the account is not found or not a valid token account.
- */
-int32_t quasar_svm_set_token_balance(QuasarSvm *svm, const uint8_t (*pubkey)[32], uint64_t amount);
-
-/**
- * Set the supply of an existing mint account in the store.
- * Returns QUASAR_ERR_EXECUTION if the account is not found or not a valid mint account.
- */
-int32_t quasar_svm_set_mint_supply(QuasarSvm *svm, const uint8_t (*pubkey)[32], uint64_t supply);
-
-/**
- * Execute a transaction without committing state changes.
- */
-int32_t quasar_svm_simulate_transaction(QuasarSvm *svm,
-                                        const uint8_t *instructions,
-                                        uint64_t instructions_len,
-                                        const uint8_t *accounts,
-                                        uint64_t accounts_len,
-                                        uint8_t **result_out,
-                                        uint64_t *result_len_out);
 
 /**
  * Execute multiple instructions as a single atomic transaction.

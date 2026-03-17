@@ -280,18 +280,6 @@ fn program_error_to_i32(err: &ProgramError) -> i32 {
     }
 }
 
-/// Serialize a single Account for the `get_account` FFI call.
-/// Format: [32] pubkey [32] owner [8] lamports [4] data_len [N] data [1] executable
-pub fn serialize_single_account(account: &Account) -> Box<[u8]> {
-    let mut w = Writer::new();
-    w.write_pubkey(&account.address);
-    w.write_pubkey(&account.owner);
-    w.write_u64(account.lamports);
-    w.write_length_prefixed(&account.data);
-    w.write_bool(account.executable);
-    w.into_boxed_slice()
-}
-
 /// Serialize an `ExecutionResult` into the wire format.
 /// Returns a boxed slice suitable for handing across FFI.
 pub fn serialize_result(result: &ExecutionResult) -> Box<[u8]> {

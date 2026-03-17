@@ -14,8 +14,8 @@
       "default": "./dist/ffi.js"
     },
     "./web3.js": {
-      "types": "./dist/web3js/index.d.ts",
-      "default": "./dist/web3js/index.js"
+      "types": "./dist/web3.js/index.d.ts",
+      "default": "./dist/web3.js/index.js"
     },
     "./kit": {
       "types": "./dist/kit/index.d.ts",
@@ -45,7 +45,7 @@
     "@solana/addresses": "^5.5.0",
     "@solana/instructions": "^5.5.0",
     "@solana/rpc-types": "^6.2.0",
-    "@solana/web3.js": ">=2.0.0"
+    "@solana/web3.js": "git:blueshift-gg/solana-web3.js#v2"
   },
   "peerDependenciesMeta": {
     "@solana/web3.js": {
@@ -65,7 +65,7 @@
     "@solana/addresses": "^5.5.0",
     "@solana/instructions": "^5.5.0",
     "@solana/rpc-types": "^6.2.0",
-    "@solana/web3.js": "github:blueshift-gg/web3.js#v2",
+    "@solana/web3.js": "github:blueshift-gg/solana-web3.js#v2",
     "@types/node": "^22.0.0",
     "typescript": "^5.7.0",
     "vitest": "^4.1.0"

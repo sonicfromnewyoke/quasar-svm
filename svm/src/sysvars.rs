@@ -45,7 +45,11 @@ impl Default for Sysvars {
             epoch_rewards: EpochRewards::default(),
             epoch_schedule,
             last_restart_slot: LastRestartSlot::default(),
-            rent: Rent::default(),
+            rent: Rent {
+                lamports_per_byte_year: 6960,
+                exemption_threshold: 1.0,
+                burn_percent: 0,
+            },
             slot_hashes,
             stake_history,
             recent_blockhashes: RecentBlockhashes::default(),

@@ -9,7 +9,7 @@
 
 QuasarSVM is a lightweight Solana virtual machine that executes transactions locally without an RPC connection or validator. Provide program ELFs, account state, and instructions — get back logs, compute units, return data, byte-level account diffs, and resulting accounts.
 
-`SvmAccount` is the universal account type across all layers.
+`Account` is the universal account type across all layers.
 
 ```toml
 [dependencies]
@@ -106,25 +106,25 @@ console.log(result.tokenBalance(bob.address)); // 1000n
 
 | Document | Content |
 |----------|---------|
-| [Core API](docs/api.md) | `QuasarSvm` — programs, execution, account store, cheatcodes, `ExecutionResult` |
-| [Accounts](docs/accounts.md) | `SvmAccount` type, account factories, optional address pattern, interop helpers |
-| [Tokens](docs/tokens.md) | Mint/Token types, instruction builders, result helpers, cheatcodes, ATA derivation |
+| [Core API](docs/api.md) | `QuasarSvm` — programs, execution, sysvars, `ExecutionResult` |
+| [Accounts](docs/accounts.md) | Account types, account factories, optional address pattern, interop helpers |
+| [Tokens](docs/tokens.md) | Mint/Token types, instruction builders, result helpers, ATA derivation |
 
 ## Exports
 
 | Import Path | Address Type | Account Type | Description |
 |-------------|-------------|--------------|-------------|
-| `@blueshift-gg/quasar-svm/web3.js` | `PublicKey` | `SvmAccount` | `@solana/web3.js` API |
-| `@blueshift-gg/quasar-svm/kit` | `Address` | `SvmAccount` | `@solana/kit` API |
+| `@blueshift-gg/quasar-svm/web3.js` | `PublicKey` | `KeyedAccount` | `@solana/web3.js` API |
+| `@blueshift-gg/quasar-svm/kit` | `Address` | `Account` | `@solana/kit` API |
 | `@blueshift-gg/quasar-svm/ffi` | — | — | Low-level native bindings |
 
-Both TypeScript APIs expose the same functionality with different address types. `SvmAccount` is the universal account type across all layers. The web3.js layer additionally provides `toKeyedAccountInfo` / `fromKeyedAccountInfo` for interop with legacy code.
+Both TypeScript APIs expose the same functionality with different address types. The web3.js layer uses `KeyedAccount` and the kit layer uses `Account`. The web3.js layer additionally provides `toKeyedAccountInfo` / `fromKeyedAccountInfo` for interop with legacy code.
 
 ## Workspace
 
 | Crate | Path | Purpose |
 |-------|------|---------|
-| `quasar-svm` | `svm/` | Core execution engine — `QuasarSvm`, `ExecutionResult`, `SvmAccount`, token helpers |
+| `quasar-svm` | `svm/` | Core execution engine — `QuasarSvm`, `ExecutionResult`, `Account`, token helpers |
 | `quasar-svm-ffi` | `ffi/` | C-ABI wrapper for Node.js FFI via koffi |
 | TypeScript bindings | `bindings/node/` | `web3.js` and `kit` API layers over the native engine |
 

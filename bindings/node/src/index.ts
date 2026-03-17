@@ -64,16 +64,6 @@ export type ExecutionStatus =
   | { ok: false; error: ProgramError };
 
 // ---------------------------------------------------------------------------
-// AccountDiff — pre/post snapshot of a modified account
-// ---------------------------------------------------------------------------
-
-export interface AccountDiff<TAccount extends { address: unknown }> {
-  address: TAccount["address"];
-  pre: TAccount;
-  post: TAccount;
-}
-
-// ---------------------------------------------------------------------------
 // Sysvars
 // ---------------------------------------------------------------------------
 
@@ -92,3 +82,6 @@ export interface EpochSchedule {
   firstNormalEpoch: bigint;
   firstNormalSlot: bigint;
 }
+
+export type { QuasarSvmConfig } from "./base.js";
+export { QUASAR_SVM_CONFIG_FULL } from "./base.js";

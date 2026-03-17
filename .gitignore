@@ -1,5 +1,6 @@
 /target
 /dist
+/docs/node_modules
 /node_modules
 bindings/java
 bindings/go

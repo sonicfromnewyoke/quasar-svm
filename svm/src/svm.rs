@@ -63,6 +63,27 @@ pub struct ExecutionResult {
     pub logs: Vec<String>,
 }
 
+/// Configuration for loading bundled SPL programs.
+#[derive(Debug, Clone)]
+pub struct QuasarSvmConfig {
+    /// Load SPL Token program (default: true)
+    pub token: bool,
+    /// Load SPL Token-2022 program (default: true)
+    pub token_2022: bool,
+    /// Load SPL Associated Token Account program (default: true)
+    pub associated_token: bool,
+}
+
+impl Default for QuasarSvmConfig {
+    fn default() -> Self {
+        Self {
+            token: true,
+            token_2022: true,
+            associated_token: true,
+        }
+    }
+}
+
 pub struct QuasarSvm {
     pub compute_budget: ComputeBudget,
     pub feature_set: FeatureSet,
@@ -79,19 +100,41 @@ impl Default for QuasarSvm {
 }
 
 impl QuasarSvm {
+    /// Create a new QuasarSvm instance with all SPL programs loaded by default.
     pub fn new() -> Self {
+        Self::new_with_config(QuasarSvmConfig::default())
+    }
+
+    /// Create a new QuasarSvm instance with custom program loading configuration.
+    pub fn new_with_config(config: QuasarSvmConfig) -> Self {
         let feature_set = FeatureSet::all_enabled();
         let compute_budget = ComputeBudget::new_with_defaults(true, true);
         let program_cache = ProgramCache::new(&feature_set, &compute_budget);
 
-        Self {
+        let svm = Self {
             compute_budget,
             feature_set,
             logger: Some(LogCollector::new_ref()),
             program_cache,
             sysvars: Sysvars::default(),
             accounts: HashMap::new(),
+        };
+
+        // Load programs based on config
+        if config.token {
+            let elf = include_bytes!("../../programs/spl_token.so");
+            svm.add_program(&crate::SPL_TOKEN_PROGRAM_ID, &crate::loader_keys::LOADER_V2, elf);
         }
+        if config.token_2022 {
+            let elf = include_bytes!("../../programs/spl_token_2022.so");
+            svm.add_program(&crate::SPL_TOKEN_2022_PROGRAM_ID, &crate::loader_keys::LOADER_V3, elf);
+        }
+        if config.associated_token {
+            let elf = include_bytes!("../../programs/spl_associated_token.so");
+            svm.add_program(&crate::SPL_ASSOCIATED_TOKEN_PROGRAM_ID, &crate::loader_keys::LOADER_V2, elf);
+        }
+
+        svm
     }
 
     pub fn add_program(&self, program_id: &Pubkey, loader_key: &Pubkey, elf: &[u8]) {

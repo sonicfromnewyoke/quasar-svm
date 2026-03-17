@@ -1,0 +1,279 @@
+---
+title: Core API
+description: QuasarSvm lifecycle, programs, execution, sysvars, ExecutionResult
+---
+
+import { Tabs, TabItem } from "@astrojs/starlight/components";
+
+QuasarSVM provides an in-process Solana execution engine. Create a `QuasarSvm` instance, load programs, execute transactions, and inspect results.
+
+## QuasarSvm
+
+### Creating a VM
+
+<Tabs>
+<TabItem label="Rust" icon="seti:rust">
+```rust
+let svm = QuasarSvm::new();
+```
+</TabItem>
+<TabItem label="TypeScript" icon="seti:typescript">
+```ts
+const vm = new QuasarSvm();
+```
+</TabItem>
+</Tabs>
+
+> Native memory is freed automatically by the GC. For deterministic cleanup, use `using vm = new QuasarSvm()` or call `vm.free()`.
+
+### Loading Programs
+
+Load a custom program from an ELF binary:
+
+<Tabs>
+<TabItem label="Rust" icon="seti:rust">
+```rust
+let elf = std::fs::read("target/deploy/my_program.so").unwrap();
+svm.add_program(&program_id, &loader_keys::LOADER_V3, &elf);
+
+// Builder-style
+let svm = QuasarSvm::new()
+    .with_program(&program_id, &elf)
+    .with_program_loader(&program_id, &loader_keys::LOADER_V2, &elf);
+```
+</TabItem>
+<TabItem label="web3.js" icon="seti:typescript">
+```ts
+vm.addProgram(programId, elf);             // loader v3 (default)
+vm.addProgram(programId, elf, LOADER_V2);  // loader v2
+```
+</TabItem>
+<TabItem label="kit" icon="seti:typescript">
+```ts
+vm.addProgram(programId, elf);
+vm.addProgram(programId, elf, LOADER_V2);
+```
+</TabItem>
+</Tabs>
+
+Load bundled SPL programs:
+
+<Tabs>
+<TabItem label="Rust" icon="seti:rust">
+```rust
+let svm = QuasarSvm::new()
+    .with_token_program()
+    .with_token_2022_program()
+    .with_associated_token_program();
+```
+</TabItem>
+<TabItem label="TypeScript" icon="seti:typescript">
+**All SPL programs load by default:**
+```ts
+const vm = new QuasarSvm(); // uses QuasarSvmConfigFull (all true)
+```
+
+**To disable specific programs:**
+```ts
+const vm = new QuasarSvm({
+  token: true,          // default: true
+  token2022: false,     // disable Token-2022
+  associatedToken: true // default: true
+});
+```
+
+**Or load programs manually:**
+```ts
+const vm = new QuasarSvm({ token: false, token2022: false, associatedToken: false });
+vm.addTokenProgram();
+vm.addToken2022Program();
+vm.addAssociatedTokenProgram();
+```
+</TabItem>
+</Tabs>
+
+### Executing Instructions
+
+Two execution methods — single or chain:
+
+| Method | Behavior |
+|--------|----------|
+| `process_instruction` / `processInstruction` | Execute one instruction atomically. |
+| `process_instruction_chain` / `processInstructionChain` | Execute multiple instructions as one atomic chain. |
+
+<Tabs>
+<TabItem label="Rust" icon="seti:rust">
+```rust
+// Single instruction
+let result = svm.process_instruction(&ix, &accounts);
+
+// Multiple instructions — atomic
+let result = svm.process_instruction_chain(&[ix1, ix2], &accounts);
+```
+
+Accounts are `&[Account]` — a slice of `Account` structs.
+</TabItem>
+<TabItem label="web3.js" icon="seti:typescript">
+```ts
+// Single instruction
+const result = vm.processInstruction(ix, accounts);
+
+// Multiple instructions — atomic
+const result = vm.processInstructionChain([ix1, ix2], accounts);
+```
+
+Accounts are `KeyedAccountInfo[]`.
+</TabItem>
+<TabItem label="kit" icon="seti:typescript">
+```ts
+const result = vm.processInstruction(ix, accounts);
+const result = vm.processInstructionChain([ix1, ix2], accounts);
+```
+
+Accounts are `Account[]`.
+</TabItem>
+</Tabs>
+
+### Sysvars
+
+<Tabs>
+<TabItem label="Rust" icon="seti:rust">
+```rust
+svm.sysvars.warp_to_slot(200);          // updates clock.slot + slot_hashes
+svm.set_clock(clock);
+svm.set_rent(rent);
+svm.set_epoch_schedule(epoch_schedule);
+svm.set_compute_budget(200_000);
+```
+</TabItem>
+<TabItem label="TypeScript" icon="seti:typescript">
+```ts
+vm.warpToSlot(200n);                    // updates clock.slot + slot_hashes
+vm.setClock({ slot: 100n, epochStartTimestamp: 0n, epoch: 0n, leaderScheduleEpoch: 0n, unixTimestamp: 0n });
+vm.setRent(6960n);
+vm.setEpochSchedule({ slotsPerEpoch: 432000n, leaderScheduleSlotOffset: 0n, warmup: false, firstNormalEpoch: 0n, firstNormalSlot: 0n });
+vm.setComputeBudget(200_000n);
+```
+</TabItem>
+</Tabs>
+
+### Cleanup
+
+Native memory is freed automatically by the garbage collector — no manual cleanup required in most cases.
+
+For deterministic cleanup (tight loops, benchmarks), use `using` or call `free()`:
+
+```ts
+// Automatic — GC handles it
+const vm = new QuasarSvm();
+
+// Deterministic — freed when scope exits
+{
+  using vm = new QuasarSvm();
+} // freed here
+
+// Manual — explicit control
+const vm = new QuasarSvm();
+vm.free();
+```
+
+## ExecutionResult
+
+Every execution returns an `ExecutionResult`. In TypeScript it is a class with methods; in Rust it is a struct with methods.
+
+### Fields
+
+| Field | Rust | TypeScript |
+|-------|------|------------|
+| Status | `raw_result: Result<(), InstructionError>` | `status: ExecutionStatus` |
+| Compute units | `compute_units_consumed: u64` | `computeUnits: bigint` |
+| Execution time | `execution_time_us: u64` | `executionTimeUs: bigint` |
+| Return data | `return_data: Vec<u8>` | `returnData: Uint8Array` |
+| Resulting accounts | `resulting_accounts: Vec<Account>` | `accounts: KeyedAccountInfo[]` / `Account[]` |
+| Logs | `logs: Vec<String>` | `logs: string[]` |
+
+### Assertion Methods
+
+<Tabs>
+<TabItem label="Rust" icon="seti:rust">
+```rust
+result.assert_success();
+result.assert_error(ProgramError::InsufficientFunds);
+assert!(result.is_success());
+assert!(result.is_error());
+result.print_logs();
+```
+</TabItem>
+<TabItem label="TypeScript" icon="seti:typescript">
+```ts
+result.assertSuccess();
+result.assertError({ type: "InsufficientFunds" });
+result.assertError({ type: "Custom", code: 6001 });
+
+result.isSuccess();  // boolean
+result.isError();    // boolean
+result.printLogs();
+```
+</TabItem>
+</Tabs>
+
+### Account Lookup
+
+<Tabs>
+<TabItem label="Rust" icon="seti:rust">
+```rust
+let acct: Option<&Account> = result.account(&pubkey);
+let data: Option<&[u8]> = result.data(&pubkey);
+let lamps: Option<u64> = result.lamports(&pubkey);
+```
+</TabItem>
+<TabItem label="TypeScript" icon="seti:typescript">
+```ts
+// Without decoder — returns the raw account
+const acct = result.account(address);   // KeyedAccountInfo | Account<Uint8Array> | null
+
+// With decoder — decodes account data into T
+import { getTokenDecoder, getMintDecoder } from "@solana-program/token";
+
+const token = result.account(ataPubkey, getTokenDecoder());  // Token | null
+const mint  = result.account(mintPubkey, getMintDecoder());   // Mint | null
+```
+
+`result.account()` accepts any `Decoder<T>` from `@solana/codecs-core`.
+</TabItem>
+</Tabs>
+
+### Borsh Deserialization (Rust)
+
+```rust
+// Requires "borsh" feature
+let state: MyState = result.account_data(&pubkey).unwrap();
+```
+
+## ProgramError
+
+TypeScript uses a discriminated union. Known errors map to negative codes; `Custom(n)` maps to positive codes.
+
+```ts
+type ProgramError =
+  | { type: "InvalidArgument" }
+  | { type: "InvalidInstructionData" }
+  | { type: "InvalidAccountData" }
+  | { type: "AccountDataTooSmall" }
+  | { type: "InsufficientFunds" }
+  | { type: "IncorrectProgramId" }
+  | { type: "MissingRequiredSignature" }
+  | { type: "AccountAlreadyInitialized" }
+  | { type: "UninitializedAccount" }
+  | { type: "MissingAccount" }
+  | { type: "InvalidSeeds" }
+  | { type: "ArithmeticOverflow" }
+  | { type: "AccountNotRentExempt" }
+  | { type: "InvalidAccountOwner" }
+  | { type: "IncorrectAuthority" }
+  | { type: "Immutable" }
+  | { type: "BorshIoError" }
+  | { type: "ComputeBudgetExceeded" }
+  | { type: "Custom"; code: number }
+  | { type: "Runtime"; message: string }
+```
