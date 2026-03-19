@@ -53,24 +53,9 @@
 //!   [N]  UTF-8 bytes
 //! [4]   error_message_len (0 = no error)
 //! [N]   error_message UTF-8 bytes
-//! [4]   num_modified_accounts
-//! per modified account:
-//!   [32] address
-//!   // pre account:
-//!   [32] owner
-//!   [8]  lamports (u64 LE)
-//!   [4]  data_len
-//!   [N]  data
-//!   [1]  executable
-//!   // post account:
-//!   [32] owner
-//!   [8]  lamports (u64 LE)
-//!   [4]  data_len
-//!   [N]  data
-//!   [1]  executable
 //! ```
 
-use quasar_svm::{Account, AccountDiff, ExecutionResult, Instruction, Pubkey};
+use quasar_svm::{ExecutionResult, Instruction, Pubkey};
 use solana_account::Account as SolanaAccount;
 use solana_instruction::AccountMeta;
 use solana_program_error::ProgramError;
@@ -145,11 +130,19 @@ impl Writer {
         self.buf.extend_from_slice(&v.to_le_bytes());
     }
 
+    fn write_u8(&mut self, v: u8) {
+        self.buf.push(v);
+    }
+
     fn write_u32(&mut self, v: u32) {
         self.buf.extend_from_slice(&v.to_le_bytes());
     }
 
     fn write_u64(&mut self, v: u64) {
+        self.buf.extend_from_slice(&v.to_le_bytes());
+    }
+
+    fn write_f64(&mut self, v: f64) {
         self.buf.extend_from_slice(&v.to_le_bytes());
     }
 
@@ -326,28 +319,86 @@ pub fn serialize_result(result: &ExecutionResult) -> Box<[u8]> {
         None => w.write_u32(0),
     }
 
-    // Modified accounts (account diffs)
-    write_modified_accounts(&mut w, &result.modified_accounts);
+    // RPC metadata: pre/post balances
+    w.write_u32(result.pre_balances.len() as u32);
+    for balance in &result.pre_balances {
+        w.write_u64(*balance);
+    }
+
+    w.write_u32(result.post_balances.len() as u32);
+    for balance in &result.post_balances {
+        w.write_u64(*balance);
+    }
+
+    // Token balances (pre)
+    w.write_u32(result.pre_token_balances.len() as u32);
+    for tb in &result.pre_token_balances {
+        w.write_u32(tb.account_index as u32);
+        w.write_length_prefixed(tb.mint.as_bytes());
+        match &tb.owner {
+            Some(owner) => {
+                w.write_bool(true);
+                w.write_length_prefixed(owner.as_bytes());
+            }
+            None => w.write_bool(false),
+        }
+        w.write_u8(tb.ui_token_amount.decimals);
+        w.write_length_prefixed(tb.ui_token_amount.amount.as_bytes());
+        match tb.ui_token_amount.ui_amount {
+            Some(amt) => {
+                w.write_bool(true);
+                w.write_f64(amt);
+            }
+            None => w.write_bool(false),
+        }
+    }
+
+    // Token balances (post)
+    w.write_u32(result.post_token_balances.len() as u32);
+    for tb in &result.post_token_balances {
+        w.write_u32(tb.account_index as u32);
+        w.write_length_prefixed(tb.mint.as_bytes());
+        match &tb.owner {
+            Some(owner) => {
+                w.write_bool(true);
+                w.write_length_prefixed(owner.as_bytes());
+            }
+            None => w.write_bool(false),
+        }
+        w.write_u8(tb.ui_token_amount.decimals);
+        w.write_length_prefixed(tb.ui_token_amount.amount.as_bytes());
+        match tb.ui_token_amount.ui_amount {
+            Some(amt) => {
+                w.write_bool(true);
+                w.write_f64(amt);
+            }
+            None => w.write_bool(false),
+        }
+    }
+
+    // Inner instructions (legacy format, grouped by top-level instruction)
+    w.write_u32(result.inner_instructions.len() as u32);
+    for inner in &result.inner_instructions {
+        w.write_u8(inner.index);
+        w.write_u32(inner.instructions.len() as u32);
+        for ix in &inner.instructions {
+            w.write_u8(ix.program_id_index);
+            w.write_u32(ix.accounts.len() as u32);
+            for acc_idx in &ix.accounts {
+                w.write_u8(*acc_idx);
+            }
+            w.write_length_prefixed(&ix.data);
+        }
+    }
+
+    // Execution trace (list of all executed instructions with nesting and success status)
+    w.write_u32(result.execution_trace.instructions.len() as u32);
+    for instr in &result.execution_trace.instructions {
+        w.write_u8(instr.nesting_level);
+        w.write_bytes(&instr.program_id.to_bytes());
+        w.write_bool(instr.succeeded);
+    }
 
     w.into_boxed_slice()
 }
 
-/// Write modified accounts (AccountDiff list) to the wire format.
-fn write_modified_accounts(w: &mut Writer, diffs: &[AccountDiff]) {
-    w.write_u32(diffs.len() as u32);
-    for diff in diffs {
-        w.write_pubkey(&diff.address);
-        // Pre account
-        write_svm_account_fields(w, &diff.pre);
-        // Post account
-        write_svm_account_fields(w, &diff.post);
-    }
-}
-
-/// Write the fields of an Account (owner, lamports, data, executable) — no address.
-fn write_svm_account_fields(w: &mut Writer, account: &Account) {
-    w.write_pubkey(&account.owner);
-    w.write_u64(account.lamports);
-    w.write_length_prefixed(&account.data);
-    w.write_bool(account.executable);
-}

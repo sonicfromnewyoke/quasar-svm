@@ -16,7 +16,7 @@ pub use solana_sdk_ids::system_program;
 
 pub use crate::error::ProgramError;
 pub use crate::program_cache::loader_keys;
-pub use crate::svm::{ExecutionResult, QuasarSvm, QuasarSvmConfig};
+pub use crate::svm::{ExecutionResult, ExecutionTrace, ExecutedInstruction, QuasarSvm, QuasarSvmConfig};
 pub use crate::sysvars::Sysvars;
 pub use std::collections::HashMap;
 
@@ -207,23 +207,6 @@ impl ExecutionResult {
         for log in &self.logs {
             println!("  {log}");
         }
-    }
-
-    /// Deserialize a resulting account's data using borsh.
-    #[cfg(feature = "borsh")]
-    pub fn account_data<T: borsh::BorshDeserialize>(&self, address: &Pubkey) -> Option<T> {
-        self.account(address)
-            .and_then(|a| T::try_from_slice(&a.data).ok())
-    }
-
-    /// Get lamports of a resulting account. Returns 0 if not found.
-    pub fn lamports(&self, address: &Pubkey) -> u64 {
-        self.account(address).map_or(0, |a| a.lamports)
-    }
-
-    /// Get account data bytes of a resulting account.
-    pub fn data(&self, address: &Pubkey) -> Option<&[u8]> {
-        self.account(address).map(|a| a.data.as_slice())
     }
 
     /// Panic if execution did not succeed.

@@ -1,6 +1,6 @@
 import { Address } from "@solana/web3.js";
 import type { TransactionInstruction, KeyedAccountInfo } from "@solana/web3.js";
-import { getMintEncoder, getTokenEncoder, getMintSize, getTokenSize } from "@solana-program/token";
+import { getMintEncoder, getTokenEncoder, getMintSize, getTokenSize, AccountState } from "@solana-program/token";
 import type { Address as SplAddress } from "@solana/addresses";
 import * as ffi from "../ffi.js";
 import { serializeInstructions, serializeAccounts } from "./wire.js";
@@ -18,13 +18,13 @@ import {
   loadElf,
 } from "../programs.js";
 import { rentMinimumBalance } from "../token.js";
-import type { TokenAccountState } from "../token.js";
 
 export type { KeyedAccountInfo } from "./types.js";
 export { ExecutionResult } from "./result.js";
 export type { ExecutionStatus, ProgramError, Clock, EpochSchedule, QuasarSvmConfig } from "../index.js";
 export { QUASAR_SVM_CONFIG_FULL } from "../index.js";
 export { SPL_TOKEN_PROGRAM_ID, SPL_TOKEN_2022_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID, LOADER_V2, LOADER_V3, LAMPORTS_PER_SOL } from "../programs.js";
+export { AccountState } from "@solana-program/token";
 
 const mintEncoder = getMintEncoder();
 const tokenEncoder = getTokenEncoder();
@@ -45,7 +45,7 @@ export interface TokenAccountOpts {
   owner: Address;
   amount: bigint;
   delegate?: Address;
-  state?: TokenAccountState;
+  state?: AccountState;
   isNative?: bigint;
   delegatedAmount?: bigint;
   closeAuthority?: Address;
@@ -124,28 +124,12 @@ export function createKeyedSystemAccount(address: Address, lamports: bigint = LA
   return keyed(address, new Address(SYSTEM_PROGRAM_ID), lamports, Buffer.alloc(0));
 }
 
-/** Create a pre-initialized mint account. Address auto-generated if omitted. */
-export function createKeyedMintAccount(opts?: MintOpts, tokenProgramId?: Address): KeyedAccountInfo;
-export function createKeyedMintAccount(address: Address, opts?: MintOpts, tokenProgramId?: Address): KeyedAccountInfo;
+/** Create a pre-initialized mint account. */
 export function createKeyedMintAccount(
-  first?: Address | MintOpts,
-  second?: MintOpts | Address,
-  third?: Address,
+  address: Address,
+  opts: Partial<MintOpts> = {},
+  tokenProgramId: Address = new Address(SPL_TOKEN_PROGRAM_ID)
 ): KeyedAccountInfo {
-  let addr: Address;
-  let opts: MintOpts;
-  let programId: Address;
-
-  if (first instanceof Address) {
-    addr = first;
-    opts = (second && !(second instanceof Address)) ? second : {};
-    programId = third ?? (second instanceof Address ? second : undefined) ?? new Address(SPL_TOKEN_PROGRAM_ID);
-  } else {
-    addr = Address.unique();
-    opts = first ?? {};
-    programId = second instanceof Address ? second : new Address(SPL_TOKEN_PROGRAM_ID);
-  }
-
   const data = Buffer.from(mintEncoder.encode({
     mintAuthority: opts.mintAuthority ? opts.mintAuthority.toBase58() as SplAddress : null,
     supply: opts.supply ?? 0n,
@@ -153,42 +137,26 @@ export function createKeyedMintAccount(
     isInitialized: true,
     freezeAuthority: opts.freezeAuthority ? opts.freezeAuthority.toBase58() as SplAddress : null,
   }));
-  return keyed(addr, programId, rentMinimumBalance(getMintSize()), data);
+  return keyed(address, tokenProgramId, rentMinimumBalance(getMintSize()), data);
 }
 
-/** Create a pre-initialized token account. Address auto-generated if omitted. */
-export function createKeyedTokenAccount(opts: TokenAccountOpts, tokenProgramId?: Address): KeyedAccountInfo;
-export function createKeyedTokenAccount(address: Address, opts: TokenAccountOpts, tokenProgramId?: Address): KeyedAccountInfo;
+/** Create a pre-initialized token account. */
 export function createKeyedTokenAccount(
-  first: Address | TokenAccountOpts,
-  second?: TokenAccountOpts | Address,
-  third?: Address,
+  address: Address,
+  opts: TokenAccountOpts,
+  tokenProgramId: Address = new Address(SPL_TOKEN_PROGRAM_ID)
 ): KeyedAccountInfo {
-  let addr: Address;
-  let opts: TokenAccountOpts;
-  let programId: Address;
-
-  if (first instanceof Address) {
-    addr = first;
-    opts = second as TokenAccountOpts;
-    programId = third ?? new Address(SPL_TOKEN_PROGRAM_ID);
-  } else {
-    addr = Address.unique();
-    opts = first;
-    programId = second instanceof Address ? second : new Address(SPL_TOKEN_PROGRAM_ID);
-  }
-
   const data = Buffer.from(tokenEncoder.encode({
     mint: opts.mint.toBase58() as SplAddress,
     owner: opts.owner.toBase58() as SplAddress,
     amount: opts.amount,
     delegate: opts.delegate ? opts.delegate.toBase58() as SplAddress : null,
-    state: (opts.state ?? 1) as number,
+    state: (opts.state ?? AccountState.Initialized) as number,
     isNative: opts.isNative ?? null,
     delegatedAmount: opts.delegatedAmount ?? 0n,
     closeAuthority: opts.closeAuthority ? opts.closeAuthority.toBase58() as SplAddress : null,
   }));
-  return keyed(addr, programId, rentMinimumBalance(getTokenSize()), data);
+  return keyed(address, tokenProgramId, rentMinimumBalance(getTokenSize()), data);
 }
 
 /** Create a pre-initialized associated token account. Derives the ATA address automatically. */
@@ -207,7 +175,7 @@ export function createKeyedAssociatedTokenAccount(
     owner: owner.toBase58() as SplAddress,
     amount,
     delegate: null,
-    state: 1,
+    state: AccountState.Initialized,
     isNative: null,
     delegatedAmount: 0n,
     closeAuthority: null,

@@ -29,7 +29,7 @@ use solana_program_pack::Pack;
 
 use crate::program_cache::ProgramCache;
 use crate::sysvars::Sysvars;
-use crate::{Account, AccountDiff};
+use crate::Account;
 
 struct NoOpCallback;
 
@@ -59,8 +59,64 @@ pub struct ExecutionResult {
     pub raw_result: Result<(), InstructionError>,
     pub return_data: Vec<u8>,
     pub accounts: Vec<Account>,
-    pub modified_accounts: Vec<AccountDiff>,
     pub logs: Vec<String>,
+    // RPC metadata
+    pub pre_balances: Vec<u64>,
+    pub post_balances: Vec<u64>,
+    pub pre_token_balances: Vec<TokenBalance>,
+    pub post_token_balances: Vec<TokenBalance>,
+    pub inner_instructions: Vec<InnerInstructions>,
+    /// Full execution trace showing all program invocations with nesting levels.
+    /// Useful for debugging: the last frame shows where execution halted,
+    /// and you can trace back through the call stack via nesting_level.
+    pub execution_trace: ExecutionTrace,
+}
+
+#[derive(Debug, Clone)]
+pub struct TokenBalance {
+    pub account_index: usize,
+    pub mint: String,
+    pub owner: Option<String>,
+    pub ui_token_amount: UiTokenAmount,
+}
+
+#[derive(Debug, Clone)]
+pub struct UiTokenAmount {
+    pub ui_amount: Option<f64>,
+    pub decimals: u8,
+    pub amount: String,
+}
+
+/// Execution trace capturing all program invocations during transaction execution.
+/// Each instruction shows which program executed, at what depth, and whether it succeeded.
+/// Useful for debugging: hierarchical indices (0, 0.1, 0.1.1, etc.) derived from nesting_level.
+#[derive(Debug, Clone)]
+pub struct ExecutionTrace {
+    pub instructions: Vec<ExecutedInstruction>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ExecutedInstruction {
+    /// Nesting level: 0 = top-level instruction, 1+ = CPI depth
+    pub nesting_level: u8,
+    /// The program that was invoked
+    pub program_id: Pubkey,
+    /// Whether this specific invocation succeeded
+    pub succeeded: bool,
+}
+
+// Legacy inner instructions format (kept for backwards compatibility)
+#[derive(Debug, Clone)]
+pub struct InnerInstructions {
+    pub index: u8,
+    pub instructions: Vec<InnerInstruction>,
+}
+
+#[derive(Debug, Clone)]
+pub struct InnerInstruction {
+    pub program_id_index: u8,
+    pub accounts: Vec<u8>,
+    pub data: Vec<u8>,
 }
 
 /// Configuration for loading bundled SPL programs.
@@ -263,11 +319,6 @@ impl QuasarSvm {
         let pairs: Vec<(Pubkey, SolanaAccount)> = accounts.iter().map(|a| a.to_pair()).collect();
         let merged = self.merge_accounts(&pairs);
 
-        let pre_accounts: HashMap<Pubkey, Account> = merged
-            .iter()
-            .map(|(k, v)| (*k, Account::from_pair(*k, v.clone())))
-            .collect();
-
         let (sanitized_message, transaction_accounts) =
             self.compile_accounts(instructions, &merged);
 
@@ -283,6 +334,10 @@ impl QuasarSvm {
         let (compute_units_consumed, execution_time_us, raw_result, return_data) =
             self.process_message(&sanitized_message, &mut transaction_context, &sysvar_cache);
 
+        // Capture pre-execution state before merged is potentially moved
+        let pre_balances: Vec<u64> = merged.iter().map(|(_, acc)| acc.lamports()).collect();
+        let pre_token_balances = Self::extract_token_balances(&merged);
+
         let resulting_pairs = if raw_result.is_ok() {
             let result = Self::deconstruct_resulting_accounts(&transaction_context, &merged);
             if commit {
@@ -294,9 +349,19 @@ impl QuasarSvm {
         };
 
         let result_accounts = Self::pairs_to_svm_accounts(&resulting_pairs);
-        let modified_accounts = Self::compute_diffs(&pre_accounts, &resulting_pairs);
 
         let logs = self.drain_logs();
+
+        // Compute post-execution state
+        let post_balances: Vec<u64> = resulting_pairs.iter().map(|(_, acc)| acc.lamports()).collect();
+        let post_token_balances = Self::extract_token_balances(&resulting_pairs);
+
+        // Extract execution trace from transaction context
+        let (inner_instructions, execution_trace) = Self::extract_execution_trace(
+            &mut transaction_context,
+            &sanitized_message,
+            &raw_result,
+        );
 
         ExecutionResult {
             compute_units_consumed,
@@ -304,8 +369,13 @@ impl QuasarSvm {
             raw_result,
             return_data,
             accounts: result_accounts,
-            modified_accounts,
             logs,
+            pre_balances,
+            post_balances,
+            pre_token_balances,
+            post_token_balances,
+            inner_instructions,
+            execution_trace,
         }
     }
 
@@ -405,13 +475,16 @@ impl QuasarSvm {
             }
         }
 
-        // Instructions sysvar fallback.
-        if !account_keys.contains(&solana_instructions_sysvar::ID) {
+        // Instructions sysvar - always build it.
+        let instructions_sysvar = if !account_keys.contains(&solana_instructions_sysvar::ID) {
             let (id, acct) = Self::build_instructions_sysvar(instructions);
-            fallbacks.insert(id, acct);
-        }
+            fallbacks.insert(id, acct.clone());
+            Some((id, acct))
+        } else {
+            None
+        };
 
-        let transaction_accounts = sanitized_message
+        let mut transaction_accounts: Vec<(Pubkey, AccountSharedData)> = sanitized_message
             .account_keys()
             .iter()
             .map(|key| {
@@ -436,6 +509,12 @@ impl QuasarSvm {
                 (*key, AccountSharedData::default())
             })
             .collect();
+
+        // Always append the instructions sysvar if it wasn't in the message's account keys.
+        // This ensures programs can always introspect the current transaction's instructions.
+        if let Some((id, acct)) = instructions_sysvar {
+            transaction_accounts.push((id, AccountSharedData::from(acct)));
+        }
 
         (sanitized_message, transaction_accounts)
     }
@@ -473,28 +552,138 @@ impl QuasarSvm {
             .collect()
     }
 
-    /// Compute byte-level diffs between pre-execution and post-execution account states.
-    fn compute_diffs(
-        pre: &HashMap<Pubkey, Account>,
-        post: &[(Pubkey, SolanaAccount)],
-    ) -> Vec<AccountDiff> {
-        let mut diffs = Vec::new();
-        for (pubkey, post_account) in post {
-            if let Some(pre_account) = pre.get(pubkey) {
-                let post_svm = Account::from_pair(*pubkey, post_account.clone());
-                if pre_account.lamports != post_svm.lamports
-                    || pre_account.data != post_svm.data
-                    || pre_account.owner != post_svm.owner
-                {
-                    diffs.push(AccountDiff {
-                        address: *pubkey,
-                        pre: pre_account.clone(),
-                        post: post_svm,
-                    });
+    /// Extract token balances from SPL token accounts
+    fn extract_token_balances(accounts: &[(Pubkey, SolanaAccount)]) -> Vec<TokenBalance> {
+        accounts
+            .iter()
+            .enumerate()
+            .filter_map(|(index, (_, account))| {
+                // Check if account is an SPL token account (165 bytes)
+                if account.data().len() != SplTokenAccount::LEN {
+                    return None;
                 }
+
+                // Try to parse as SPL token account
+                SplTokenAccount::unpack(account.data()).ok().map(|token_account| {
+                    let amount = token_account.amount.to_string();
+
+                    // Get decimals from mint (if we have it in the accounts list)
+                    let mint_pubkey = token_account.mint;
+                    let decimals = accounts
+                        .iter()
+                        .find(|(k, _)| *k == mint_pubkey)
+                        .and_then(|(_, acc)| {
+                            if acc.data().len() == SplMint::LEN {
+                                SplMint::unpack(acc.data()).ok().map(|m| m.decimals)
+                            } else {
+                                None
+                            }
+                        })
+                        .unwrap_or(0);
+
+                    let ui_amount = if decimals > 0 {
+                        Some(token_account.amount as f64 / 10_f64.powi(decimals as i32))
+                    } else {
+                        Some(token_account.amount as f64)
+                    };
+
+                    TokenBalance {
+                        account_index: index,
+                        mint: mint_pubkey.to_string(),
+                        owner: Some(token_account.owner.to_string()),
+                        ui_token_amount: UiTokenAmount {
+                            ui_amount,
+                            decimals,
+                            amount,
+                        },
+                    }
+                })
+            })
+            .collect()
+    }
+
+    /// Extract execution trace and legacy inner instructions from the transaction context.
+    ///
+    /// Returns:
+    /// - Legacy inner instructions (grouped by top-level instruction)
+    /// - Execution trace (list of all invocations with program ID, nesting, and success status)
+    fn extract_execution_trace(
+        transaction_context: &mut TransactionContext,
+        sanitized_message: &SanitizedMessage,
+        raw_result: &Result<(), InstructionError>,
+    ) -> (Vec<InnerInstructions>, ExecutionTrace) {
+        let instruction_trace = transaction_context.take_instruction_trace();
+        let account_keys = sanitized_message.account_keys();
+        let num_frames = instruction_trace.len();
+
+        // Build execution trace: for each invocation, resolve program_id and compute succeeded
+        let instructions: Vec<ExecutedInstruction> = instruction_trace
+            .iter()
+            .enumerate()
+            .map(|(idx, frame)| {
+                let program_id_index = frame.program_account_index_in_tx as usize;
+                let program_id = *account_keys.get(program_id_index).unwrap_or(&Pubkey::default());
+
+                // Heuristic for success:
+                // - If overall result is Ok, all invocations succeeded
+                // - If overall result is Err, the last invocation is the failure point
+                let succeeded = raw_result.is_ok() || idx < num_frames - 1;
+
+                ExecutedInstruction {
+                    nesting_level: frame.nesting_level as u8,
+                    program_id,
+                    succeeded,
+                }
+            })
+            .collect();
+
+        // Build legacy inner instructions (grouped by top-level instruction)
+        let mut inner_instructions: Vec<InnerInstructions> = Vec::new();
+        let mut current_top_level_idx = None;
+        let mut current_inner_ixs = Vec::new();
+
+        for (i, frame) in instruction_trace.iter().enumerate() {
+            let nesting_level = frame.nesting_level as usize;
+
+            if nesting_level == 0 {
+                // Save previous top-level instruction's inner instructions if any
+                if let Some(top_idx) = current_top_level_idx {
+                    if !current_inner_ixs.is_empty() {
+                        inner_instructions.push(InnerInstructions {
+                            index: top_idx,
+                            instructions: current_inner_ixs,
+                        });
+                        current_inner_ixs = Vec::new();
+                    }
+                }
+                current_top_level_idx = Some(i as u8);
+            } else {
+                // CPI - add to current top-level's inner instructions
+                let accounts: Vec<u8> = frame
+                    .instruction_accounts
+                    .iter()
+                    .map(|acc| acc.index_in_transaction as u8)
+                    .collect();
+
+                current_inner_ixs.push(InnerInstruction {
+                    program_id_index: frame.program_account_index_in_tx as u8,
+                    accounts,
+                    data: Vec::new(), // instruction_data is private in v3.x
+                });
             }
         }
-        diffs
+
+        // Don't forget the last top-level instruction
+        if let Some(top_idx) = current_top_level_idx {
+            if !current_inner_ixs.is_empty() {
+                inner_instructions.push(InnerInstructions {
+                    index: top_idx,
+                    instructions: current_inner_ixs,
+                });
+            }
+        }
+
+        (inner_instructions, ExecutionTrace { instructions })
     }
 
     fn process_message<'a>(
