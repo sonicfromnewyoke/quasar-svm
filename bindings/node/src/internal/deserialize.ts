@@ -105,35 +105,35 @@ export function deserializeResult(data: Buffer): InternalResult {
     postTokenBalances.push({ accountIndex, mint, owner, uiTokenAmount: { uiAmount, decimals, amount } });
   }
 
-  // Inner instructions (legacy format)
-  const numInner = data.readUInt32LE(o); o += 4;
-  const innerInstructions = [];
-  for (let i = 0; i < numInner; i++) {
-    const index = data[o++];
-    const numIx = data.readUInt32LE(o); o += 4;
-    const instructions = [];
-    for (let j = 0; j < numIx; j++) {
-      const programIdIndex = data[o++];
-      const numAccounts = data.readUInt32LE(o); o += 4;
-      const accounts = [];
-      for (let k = 0; k < numAccounts; k++) {
-        accounts.push(data[o++]);
-      }
-      const dataLen = data.readUInt32LE(o); o += 4;
-      const ixData = new Uint8Array(data.subarray(o, o + dataLen)); o += dataLen;
-      instructions.push({ programIdIndex, accounts, data: ixData });
-    }
-    innerInstructions.push({ index, instructions });
-  }
-
-  // Execution trace (list of all executed instructions)
+  // Execution trace (list of all executed instructions with full data, compute units, and results)
   const numInstructions = data.readUInt32LE(o); o += 4;
   const instructions = [];
   for (let i = 0; i < numInstructions; i++) {
-    const nestingLevel = data[o++];
+    const stackDepth = data[o++];
+
+    // Read full instruction data
     const programId = new Uint8Array(data.subarray(o, o + 32)); o += 32;
-    const succeeded = data[o++] !== 0;
-    instructions.push({ nestingLevel, programId, succeeded });
+    const numAccounts = data.readUInt32LE(o); o += 4;
+    const accounts = [];
+    for (let j = 0; j < numAccounts; j++) {
+      const pubkey = new Uint8Array(data.subarray(o, o + 32)); o += 32;
+      const isSigner = data[o++] !== 0;
+      const isWritable = data[o++] !== 0;
+      accounts.push({ pubkey, isSigner, isWritable });
+    }
+    const dataLen = data.readUInt32LE(o); o += 4;
+    const ixData = new Uint8Array(data.subarray(o, o + dataLen)); o += dataLen;
+
+    // Read compute units and result
+    const computeUnitsConsumed = data.readBigUInt64LE(o); o += 8;
+    const result = data.readBigUInt64LE(o); o += 8;
+
+    instructions.push({
+      stackDepth,
+      instruction: { programId, accounts, data: ixData },
+      computeUnitsConsumed,
+      result,
+    });
   }
   const executionTrace = { instructions };
 
@@ -153,7 +153,6 @@ export function deserializeResult(data: Buffer): InternalResult {
     postBalances,
     preTokenBalances,
     postTokenBalances,
-    innerInstructions,
     executionTrace,
   };
 }

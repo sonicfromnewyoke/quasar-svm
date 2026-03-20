@@ -19,19 +19,23 @@ export interface TokenBalance {
   };
 }
 
-export interface InnerInstructions {
-  index: number;
-  instructions: Array<{
-    programIdIndex: number;
-    accounts: number[];
-    data: Uint8Array;
-  }>;
+export interface AccountMeta {
+  pubkey: Uint8Array;
+  isSigner: boolean;
+  isWritable: boolean;
+}
+
+export interface Instruction {
+  programId: Uint8Array;
+  accounts: AccountMeta[];
+  data: Uint8Array;
 }
 
 export interface ExecutedInstruction {
-  nestingLevel: number;
-  programId: Uint8Array;
-  succeeded: boolean;
+  stackDepth: number;
+  instruction: Instruction;
+  computeUnitsConsumed: bigint;
+  result: bigint;
 }
 
 export interface ExecutionTrace {
@@ -49,6 +53,5 @@ export interface InternalResult {
   postBalances: bigint[];
   preTokenBalances: TokenBalance[];
   postTokenBalances: TokenBalance[];
-  innerInstructions: InnerInstructions[];
   executionTrace: ExecutionTrace;
 }

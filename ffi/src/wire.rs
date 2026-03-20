@@ -376,27 +376,24 @@ pub fn serialize_result(result: &ExecutionResult) -> Box<[u8]> {
         }
     }
 
-    // Inner instructions (legacy format, grouped by top-level instruction)
-    w.write_u32(result.inner_instructions.len() as u32);
-    for inner in &result.inner_instructions {
-        w.write_u8(inner.index);
-        w.write_u32(inner.instructions.len() as u32);
-        for ix in &inner.instructions {
-            w.write_u8(ix.program_id_index);
-            w.write_u32(ix.accounts.len() as u32);
-            for acc_idx in &ix.accounts {
-                w.write_u8(*acc_idx);
-            }
-            w.write_length_prefixed(&ix.data);
-        }
-    }
-
-    // Execution trace (list of all executed instructions with nesting and success status)
+    // Execution trace (list of all executed instructions with full data, compute units, and results)
     w.write_u32(result.execution_trace.instructions.len() as u32);
     for instr in &result.execution_trace.instructions {
-        w.write_u8(instr.nesting_level);
-        w.write_bytes(&instr.program_id.to_bytes());
-        w.write_bool(instr.succeeded);
+        w.write_u8(instr.stack_depth);
+
+        // Write full instruction data
+        w.write_bytes(&instr.instruction.program_id.to_bytes());
+        w.write_u32(instr.instruction.accounts.len() as u32);
+        for acc in &instr.instruction.accounts {
+            w.write_bytes(&acc.pubkey.to_bytes());
+            w.write_bool(acc.is_signer);
+            w.write_bool(acc.is_writable);
+        }
+        w.write_length_prefixed(&instr.instruction.data);
+
+        // Write compute units and result
+        w.write_u64(instr.compute_units_consumed);
+        w.write_u64(instr.result);
     }
 
     w.into_boxed_slice()

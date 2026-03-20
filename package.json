@@ -22,6 +22,12 @@
       "default": "./dist/kit/index.js"
     }
   },
+  "files": [
+    "dist",
+    "include/quasar_svm.h",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "build": "tsc",
     "build:native": "cargo build --release && cp target/release/libquasar_svm.* . 2>/dev/null; cp target/release/quasar_svm.dll . 2>/dev/null; true",

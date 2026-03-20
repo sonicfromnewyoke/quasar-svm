@@ -4,7 +4,10 @@ PLATFORMS := darwin-arm64 darwin-x64 linux-x64-gnu linux-arm64-gnu win32-x64-msv
 
 RUST_TARGETS := aarch64-apple-darwin x86_64-apple-darwin x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu x86_64-pc-windows-gnu
 
+PYTHON_DIR := bindings/python
+
 .PHONY: build build-all clean copy-binary prepublish publish publish-platform version
+.PHONY: build-python-wheel publish-python clean-python
 
 build:
 	cargo build --release -p quasar-svm-ffi
@@ -30,7 +33,7 @@ build-all:
 	npx tsc
 	@echo "All platform binaries built and copied."
 
-clean:
+clean: clean-python
 	rm -rf dist target
 
 # Copy a pre-built binary into the correct platform package directory.
@@ -110,3 +113,59 @@ endif
 			fs.writeFileSync('package.json', JSON.stringify(root, null, 2) + '\n'); \
 			console.log('Updated optionalDependencies ->', '$(V)'); \
 		}"
+
+# ============================================================================
+# Python wheel building targets
+# ============================================================================
+#
+# Multi-platform workflow:
+#   1. On each platform (macOS, Linux, Windows):
+#      $ make build-python-wheel
+#      Copy the .whl file from bindings/python/dist/ to a collection directory
+#
+#   2. On any platform, collect all .whl files into bindings/python/dist/
+#
+#   3. Publish all wheels at once:
+#      $ make publish-python
+#
+# Requirements:
+#   - pip install build twine
+#   - PyPI API token (set as TWINE_PASSWORD with TWINE_USERNAME=__token__)
+#
+# ============================================================================
+
+# Build Python wheel for the CURRENT platform.
+# Usage: On each platform, run `make build-python-wheel` to create a platform-specific wheel.
+build-python-wheel: build
+	@echo "Copying native library to Python package..."
+	@mkdir -p $(PYTHON_DIR)/quasar_svm
+ifeq ($(shell uname -s),Darwin)
+	cp target/release/libquasar_svm.dylib $(PYTHON_DIR)/quasar_svm/
+else ifeq ($(OS),Windows_NT)
+	cp target/release/quasar_svm.dll $(PYTHON_DIR)/quasar_svm/
+else
+	cp target/release/libquasar_svm.so $(PYTHON_DIR)/quasar_svm/
+endif
+	@echo "Building Python wheel for current platform..."
+	cd $(PYTHON_DIR) && python -m build --wheel
+	@echo "Wheel built in $(PYTHON_DIR)/dist/"
+	@echo "Copy this wheel to a collection directory before running on another platform."
+
+# Publish Python wheels to PyPI.
+# First, collect all .whl files from different platforms into bindings/python/dist/
+# Then run this target to upload them all at once.
+# Requires: pip install twine
+# Set TWINE_USERNAME and TWINE_PASSWORD env vars, or use __token__ + API token.
+publish-python:
+	@echo "Publishing Python wheels to PyPI..."
+	@echo "Uploading wheels from $(PYTHON_DIR)/dist/:"
+	@ls -lh $(PYTHON_DIR)/dist/*.whl
+	cd $(PYTHON_DIR) && twine upload dist/*.whl
+	@echo "Python package published!"
+
+# Clean Python build artifacts.
+clean-python:
+	rm -rf $(PYTHON_DIR)/dist $(PYTHON_DIR)/build $(PYTHON_DIR)/*.egg-info
+	rm -f $(PYTHON_DIR)/quasar_svm/libquasar_svm.dylib
+	rm -f $(PYTHON_DIR)/quasar_svm/libquasar_svm.so
+	rm -f $(PYTHON_DIR)/quasar_svm/quasar_svm.dll

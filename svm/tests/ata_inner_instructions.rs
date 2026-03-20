@@ -1,10 +1,10 @@
-/// Test to show inner instructions with actual CPIs (ATA creation)
+/// Test execution trace with actual CPIs (ATA creation)
 use quasar_svm::token::{create_keyed_mint_account, Mint};
 use quasar_svm::{QuasarSvm, Account, Pubkey, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID};
 use solana_instruction::Instruction;
 
 #[test]
-fn test_ata_creation_with_cpis() {
+fn test_ata_creation_execution_trace() {
     let mut svm = QuasarSvm::new()
         .with_token_program()
         .with_associated_token_program();
@@ -83,40 +83,56 @@ fn test_ata_creation_with_cpis() {
     // Show execution trace
     println!("📊 Execution Trace:");
     println!("  Total executed instructions: {}", result.execution_trace.instructions.len());
-    for (idx, instr) in result.execution_trace.instructions.iter().enumerate() {
-        let indent = "  ".repeat(instr.nesting_level as usize);
-        let status = if instr.succeeded { "✓" } else { "✗" };
-        println!("  [{}] {}L{} {status} → {}",
+    for (idx, exec_instr) in result.execution_trace.instructions.iter().enumerate() {
+        let indent = "  ".repeat(exec_instr.stack_depth as usize);
+        let status = if exec_instr.result == 0 { "✅" } else { "❌" };
+        println!("  [{}] {}Depth={} {status} → {}",
             idx,
             indent,
-            instr.nesting_level,
-            instr.program_id
+            exec_instr.stack_depth,
+            exec_instr.instruction.program_id
+        );
+        println!("       {}  CUs: {}, Accounts: {}, Data: {} bytes",
+            indent,
+            exec_instr.compute_units_consumed,
+            exec_instr.instruction.accounts.len(),
+            exec_instr.instruction.data.len()
         );
     }
 
-    // Show inner instructions (the main point of this test)
-    println!("\n🔍 Legacy Inner Instructions (grouped by top-level):");
-    println!("  Count: {}", result.inner_instructions.len());
+    // Analyze CPI structure
+    let depth_0 = result.execution_trace.instructions.iter().filter(|i| i.stack_depth == 0).count();
+    let depth_1 = result.execution_trace.instructions.iter().filter(|i| i.stack_depth == 1).count();
+    let depth_2_plus = result.execution_trace.instructions.iter().filter(|i| i.stack_depth >= 2).count();
 
-    if result.inner_instructions.is_empty() {
-        println!("  → No CPIs detected");
-    } else {
-        for inner_set in &result.inner_instructions {
-            println!("\n  ✓ Top-level instruction #{} had {} CPI(s):", inner_set.index, inner_set.instructions.len());
-            for (i, ix) in inner_set.instructions.iter().enumerate() {
-                println!("    [{i}] Program ID index: {}", ix.program_id_index);
-                println!("        Accounts: {:?}", ix.accounts);
-                println!("        Data length: {} bytes", ix.data.len());
-                if !ix.data.is_empty() {
-                    println!("        Data (first 32 bytes): {:?}", &ix.data[..ix.data.len().min(32)]);
-                }
-            }
-        }
+    println!("\n🔍 CPI Structure:");
+    println!("  Depth 0 (top-level): {} instruction(s)", depth_0);
+    println!("  Depth 1 (first-level CPIs): {} instruction(s)", depth_1);
+    if depth_2_plus > 0 {
+        println!("  Depth 2+ (nested CPIs): {} instruction(s)", depth_2_plus);
     }
 
-    // Debug: Show raw structure
-    println!("\n🔧 Raw Structure:");
-    println!("  inner_instructions: {:#?}", result.inner_instructions);
+    // Show unique programs invoked
+    let mut programs: Vec<_> = result.execution_trace.instructions.iter()
+        .map(|i| i.instruction.program_id)
+        .collect();
+    programs.sort();
+    programs.dedup();
+    println!("\n  Programs invoked:");
+    for program in programs {
+        let count = result.execution_trace.instructions.iter()
+            .filter(|i| i.instruction.program_id == program)
+            .count();
+        println!("    - {} ({} time(s))", program, count);
+    }
+
+    // Show compute unit breakdown
+    println!("\n💻 Compute Unit Breakdown:");
+    let total_cus: u64 = result.execution_trace.instructions.iter()
+        .map(|i| i.compute_units_consumed)
+        .sum();
+    println!("  Total from trace: {} CUs", total_cus);
+    println!("  Reported overall: {} CUs", result.compute_units_consumed);
 
     println!("\n📝 Transaction Logs:");
     for log in &result.logs {
@@ -134,4 +150,12 @@ fn test_ata_creation_with_cpis() {
             println!("  Data length: {} bytes", ata.data.len());
         }
     }
+
+    // Verify execution trace structure (regardless of success/failure)
+    assert!(!result.execution_trace.instructions.is_empty(), "Should have at least one instruction in trace");
+    assert_eq!(result.execution_trace.instructions[0].stack_depth, 0, "First instruction should be at depth 0");
+
+    // Note: ATA creation may fail if mint isn't properly initialized, but we're testing
+    // the execution trace structure here, which should be present regardless
+    println!("\n✅ Execution trace structure verified!");
 }

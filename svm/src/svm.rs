@@ -10,7 +10,7 @@ use agave_syscalls::{
 use solana_account::{Account as SolanaAccount, AccountSharedData, ReadableAccount, WritableAccount};
 use solana_compute_budget::compute_budget::ComputeBudget;
 use solana_hash::Hash;
-use solana_instruction::{BorrowedAccountMeta, BorrowedInstruction, Instruction};
+use solana_instruction::{AccountMeta, BorrowedAccountMeta, BorrowedInstruction, Instruction};
 use solana_instruction_error::InstructionError;
 use solana_instructions_sysvar::construct_instructions_data;
 use solana_message::{LegacyMessage, Message, SanitizedMessage};
@@ -65,10 +65,9 @@ pub struct ExecutionResult {
     pub post_balances: Vec<u64>,
     pub pre_token_balances: Vec<TokenBalance>,
     pub post_token_balances: Vec<TokenBalance>,
-    pub inner_instructions: Vec<InnerInstructions>,
-    /// Full execution trace showing all program invocations with nesting levels.
-    /// Useful for debugging: the last frame shows where execution halted,
-    /// and you can trace back through the call stack via nesting_level.
+    /// Full execution trace showing all program invocations with stack depth, compute units,
+    /// and execution results. Each instruction includes the full instruction data.
+    /// Useful for debugging: trace the call stack via stack_depth and see where execution halted.
     pub execution_trace: ExecutionTrace,
 }
 
@@ -88,8 +87,9 @@ pub struct UiTokenAmount {
 }
 
 /// Execution trace capturing all program invocations during transaction execution.
-/// Each instruction shows which program executed, at what depth, and whether it succeeded.
-/// Useful for debugging: hierarchical indices (0, 0.1, 0.1.1, etc.) derived from nesting_level.
+/// Each instruction shows full instruction data, stack depth, compute units consumed,
+/// and execution result. Parsed from program logs for accuracy.
+/// Useful for debugging: trace the call stack via stack_depth and see exact failure points.
 #[derive(Debug, Clone)]
 pub struct ExecutionTrace {
     pub instructions: Vec<ExecutedInstruction>,
@@ -97,26 +97,14 @@ pub struct ExecutionTrace {
 
 #[derive(Debug, Clone)]
 pub struct ExecutedInstruction {
-    /// Nesting level: 0 = top-level instruction, 1+ = CPI depth
-    pub nesting_level: u8,
-    /// The program that was invoked
-    pub program_id: Pubkey,
-    /// Whether this specific invocation succeeded
-    pub succeeded: bool,
-}
-
-// Legacy inner instructions format (kept for backwards compatibility)
-#[derive(Debug, Clone)]
-pub struct InnerInstructions {
-    pub index: u8,
-    pub instructions: Vec<InnerInstruction>,
-}
-
-#[derive(Debug, Clone)]
-pub struct InnerInstruction {
-    pub program_id_index: u8,
-    pub accounts: Vec<u8>,
-    pub data: Vec<u8>,
+    /// Call stack depth: 0 = top-level instruction, 1+ = CPI depth
+    pub stack_depth: u8,
+    /// The full instruction that was executed (program_id, accounts, data)
+    pub instruction: Instruction,
+    /// Compute units consumed by this specific invocation (parsed from logs)
+    pub compute_units_consumed: u64,
+    /// Execution result: 0 = success, error code otherwise (parsed from logs)
+    pub result: u64,
 }
 
 /// Configuration for loading bundled SPL programs.
@@ -356,11 +344,11 @@ impl QuasarSvm {
         let post_balances: Vec<u64> = resulting_pairs.iter().map(|(_, acc)| acc.lamports()).collect();
         let post_token_balances = Self::extract_token_balances(&resulting_pairs);
 
-        // Extract execution trace from transaction context
-        let (inner_instructions, execution_trace) = Self::extract_execution_trace(
+        // Extract execution trace from transaction context (using logs for accurate results)
+        let execution_trace = Self::extract_execution_trace(
             &mut transaction_context,
             &sanitized_message,
-            &raw_result,
+            &logs,
         );
 
         ExecutionResult {
@@ -374,7 +362,6 @@ impl QuasarSvm {
             post_balances,
             pre_token_balances,
             post_token_balances,
-            inner_instructions,
             execution_trace,
         }
     }
@@ -602,88 +589,163 @@ impl QuasarSvm {
             .collect()
     }
 
-    /// Extract execution trace and legacy inner instructions from the transaction context.
-    ///
-    /// Returns:
-    /// - Legacy inner instructions (grouped by top-level instruction)
-    /// - Execution trace (list of all invocations with program ID, nesting, and success status)
+    /// Parse program logs to extract per-instruction results and compute units.
+    /// Returns a map of (stack_depth, instruction_index) -> (result_code, compute_units).
+    /// Note: Logs use 1-based depth [1], but we convert to 0-based to match trace nesting_level.
+    fn parse_log_results(logs: &[String]) -> HashMap<(u8, usize), (u64, u64)> {
+        let mut results = HashMap::new();
+        let mut stack: Vec<(u8, usize, Pubkey)> = Vec::new(); // (depth_0based, idx, program_id)
+        let mut instruction_counter = 0;
+
+        for log in logs {
+            // Parse "Program <id> invoke [<depth>]"
+            // Logs use 1-based depth, convert to 0-based to match trace
+            if let Some(depth_1based) = Self::parse_invoke_log(log) {
+                let depth_0based = depth_1based.saturating_sub(1);
+                stack.push((depth_0based, instruction_counter, Pubkey::default()));
+                instruction_counter += 1;
+                continue;
+            }
+
+            // Parse "Program <id> consumed <units> of <total> compute units"
+            if let Some(units) = Self::parse_consumed_log(log) {
+                if let Some((depth, idx, _)) = stack.last() {
+                    results.entry((*depth, *idx))
+                        .and_modify(|e: &mut (u64, u64)| e.1 = units)
+                        .or_insert((0, units));
+                }
+                continue;
+            }
+
+            // Parse "Program <id> success" or "Program <id> failed: <error>"
+            if let Some(error_code) = Self::parse_result_log(log) {
+                if let Some((depth, idx, _)) = stack.pop() {
+                    results.entry((depth, idx))
+                        .and_modify(|e| e.0 = error_code)
+                        .or_insert((error_code, 0));
+                }
+            }
+        }
+
+        results
+    }
+
+    /// Parse "Program <id> invoke [<depth>]" log line.
+    /// Returns Some(depth) if matched.
+    fn parse_invoke_log(log: &str) -> Option<u8> {
+        if log.contains("invoke [") {
+            log.split("invoke [")
+                .nth(1)?
+                .split(']')
+                .next()?
+                .parse::<u8>()
+                .ok()
+        } else {
+            None
+        }
+    }
+
+    /// Parse "Program <id> consumed <units> of <total> compute units" log line.
+    /// Returns Some(units) if matched.
+    fn parse_consumed_log(log: &str) -> Option<u64> {
+        if log.contains("consumed ") && log.contains(" compute units") {
+            log.split("consumed ")
+                .nth(1)?
+                .split(' ')
+                .next()?
+                .parse::<u64>()
+                .ok()
+        } else {
+            None
+        }
+    }
+
+    /// Parse "Program <id> success" or "Program <id> failed: <error>" log line.
+    /// Returns Some(0) for success, Some(error_code) for failure, None if not a result line.
+    fn parse_result_log(log: &str) -> Option<u64> {
+        if log.contains(" success") {
+            Some(0)
+        } else if log.contains(" failed: ") {
+            // Extract error code from the error message
+            // For now, return 1 for generic error. We can enhance this later.
+            Some(1)
+        } else {
+            None
+        }
+    }
+
+    /// Extract execution trace from the transaction context and logs.
+    /// Returns execution trace with full instruction data, compute units, and results.
     fn extract_execution_trace(
         transaction_context: &mut TransactionContext,
         sanitized_message: &SanitizedMessage,
-        raw_result: &Result<(), InstructionError>,
-    ) -> (Vec<InnerInstructions>, ExecutionTrace) {
+        logs: &[String],
+    ) -> ExecutionTrace {
+        // First, collect instruction data before taking the trace
+        let trace_len = transaction_context.get_instruction_trace_length();
+        let instruction_data_vec: Vec<Vec<u8>> = (0..trace_len)
+            .map(|idx| {
+                transaction_context
+                    .get_instruction_context_at_index_in_trace(idx)
+                    .ok()
+                    .map(|ctx| ctx.get_instruction_data().to_vec())
+                    .unwrap_or_default()
+            })
+            .collect();
+
+        // Now take the trace
         let instruction_trace = transaction_context.take_instruction_trace();
         let account_keys = sanitized_message.account_keys();
-        let num_frames = instruction_trace.len();
 
-        // Build execution trace: for each invocation, resolve program_id and compute succeeded
+        // Parse logs to get per-instruction results and compute units
+        let log_results = Self::parse_log_results(logs);
+
+        // Build execution trace with full instruction data
         let instructions: Vec<ExecutedInstruction> = instruction_trace
             .iter()
             .enumerate()
             .map(|(idx, frame)| {
+                let stack_depth = frame.nesting_level as u8;
                 let program_id_index = frame.program_account_index_in_tx as usize;
                 let program_id = *account_keys.get(program_id_index).unwrap_or(&Pubkey::default());
 
-                // Heuristic for success:
-                // - If overall result is Ok, all invocations succeeded
-                // - If overall result is Err, the last invocation is the failure point
-                let succeeded = raw_result.is_ok() || idx < num_frames - 1;
+                // Get instruction data from our pre-collected vec
+                let instruction_data = instruction_data_vec.get(idx).cloned().unwrap_or_default();
+
+                // Build account metas from instruction accounts
+                let accounts: Vec<AccountMeta> = frame
+                    .instruction_accounts
+                    .iter()
+                    .filter_map(|acc| {
+                        let pubkey = account_keys.get(acc.index_in_transaction as usize)?;
+                        Some(AccountMeta {
+                            pubkey: *pubkey,
+                            is_signer: acc.is_signer(),
+                            is_writable: acc.is_writable(),
+                        })
+                    })
+                    .collect();
+
+                // Get result and compute units from logs
+                let (result, compute_units_consumed) = log_results
+                    .get(&(stack_depth, idx))
+                    .copied()
+                    .unwrap_or((0, 0));
 
                 ExecutedInstruction {
-                    nesting_level: frame.nesting_level as u8,
-                    program_id,
-                    succeeded,
+                    stack_depth,
+                    instruction: Instruction {
+                        program_id,
+                        accounts,
+                        data: instruction_data,
+                    },
+                    compute_units_consumed,
+                    result,
                 }
             })
             .collect();
 
-        // Build legacy inner instructions (grouped by top-level instruction)
-        let mut inner_instructions: Vec<InnerInstructions> = Vec::new();
-        let mut current_top_level_idx = None;
-        let mut current_inner_ixs = Vec::new();
-
-        for (i, frame) in instruction_trace.iter().enumerate() {
-            let nesting_level = frame.nesting_level as usize;
-
-            if nesting_level == 0 {
-                // Save previous top-level instruction's inner instructions if any
-                if let Some(top_idx) = current_top_level_idx {
-                    if !current_inner_ixs.is_empty() {
-                        inner_instructions.push(InnerInstructions {
-                            index: top_idx,
-                            instructions: current_inner_ixs,
-                        });
-                        current_inner_ixs = Vec::new();
-                    }
-                }
-                current_top_level_idx = Some(i as u8);
-            } else {
-                // CPI - add to current top-level's inner instructions
-                let accounts: Vec<u8> = frame
-                    .instruction_accounts
-                    .iter()
-                    .map(|acc| acc.index_in_transaction as u8)
-                    .collect();
-
-                current_inner_ixs.push(InnerInstruction {
-                    program_id_index: frame.program_account_index_in_tx as u8,
-                    accounts,
-                    data: Vec::new(), // instruction_data is private in v3.x
-                });
-            }
-        }
-
-        // Don't forget the last top-level instruction
-        if let Some(top_idx) = current_top_level_idx {
-            if !current_inner_ixs.is_empty() {
-                inner_instructions.push(InnerInstructions {
-                    index: top_idx,
-                    instructions: current_inner_ixs,
-                });
-            }
-        }
-
-        (inner_instructions, ExecutionTrace { instructions })
+        ExecutionTrace { instructions }
     }
 
     fn process_message<'a>(

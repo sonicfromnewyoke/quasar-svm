@@ -60,24 +60,27 @@ fn test_execution_trace_simple_transfer() {
     // Show execution trace
     println!("\n📊 Execution Trace:");
     println!("  Total executed instructions: {}", result.execution_trace.instructions.len());
-    for (idx, instr) in result.execution_trace.instructions.iter().enumerate() {
-        let indent = "  ".repeat(instr.nesting_level as usize);
-        let status = if instr.succeeded { "✓" } else { "✗" };
-        println!("  [{}] {}L{} {status} → {}",
+    for (idx, exec_instr) in result.execution_trace.instructions.iter().enumerate() {
+        let indent = "  ".repeat(exec_instr.stack_depth as usize);
+        let status = if exec_instr.result == 0 { "✅" } else { "❌" };
+        println!("  [{}] {}Depth={} {status} → {}",
             idx,
             indent,
-            instr.nesting_level,
-            instr.program_id
+            exec_instr.stack_depth,
+            exec_instr.instruction.program_id
         );
+        println!("       {}  CUs: {}", indent, exec_instr.compute_units_consumed);
     }
 
     println!("\n📈 Analysis:");
     println!("  Total instructions: {}", result.execution_trace.instructions.len());
-    let top_level: Vec<_> = result.execution_trace.instructions.iter().filter(|i| i.nesting_level == 0).collect();
-    let cpis: Vec<_> = result.execution_trace.instructions.iter().filter(|i| i.nesting_level == 1).collect();
+    let top_level: Vec<_> = result.execution_trace.instructions.iter().filter(|i| i.stack_depth == 0).collect();
+    let cpis: Vec<_> = result.execution_trace.instructions.iter().filter(|i| i.stack_depth == 1).collect();
     println!("  Top-level only: {}", top_level.len());
     println!("  CPIs: {}", cpis.len());
-    println!("  → This is a direct instruction with no CPIs");
+    if cpis.is_empty() {
+        println!("  → This is a direct instruction with no CPIs");
+    }
 
     assert!(result.is_ok());
 }
@@ -147,22 +150,27 @@ fn test_execution_trace_on_error() {
         println!("  No execution trace available");
     } else {
         println!("  Total executed instructions: {}", result.execution_trace.instructions.len());
-        for (idx, instr) in result.execution_trace.instructions.iter().enumerate() {
-            let indent = "  ".repeat(instr.nesting_level as usize);
-            let status = if instr.succeeded { "✓" } else { "✗" };
-            println!("  [{}] {}L{} {status} → {}",
+        for (idx, exec_instr) in result.execution_trace.instructions.iter().enumerate() {
+            let indent = "  ".repeat(exec_instr.stack_depth as usize);
+            let status = if exec_instr.result == 0 {
+                "✅".to_string()
+            } else {
+                format!("❌({})", exec_instr.result)
+            };
+            println!("  [{}] {}Depth={} {status} → {}",
                 idx,
                 indent,
-                instr.nesting_level,
-                instr.program_id
+                exec_instr.stack_depth,
+                exec_instr.instruction.program_id
             );
         }
 
         if result.is_err() {
             if let Some(failure) = result.execution_trace.instructions.last() {
                 println!("\n❌ Execution halted at:");
-                println!("  Program: {}", failure.program_id);
-                println!("  Nesting level: {}", failure.nesting_level);
+                println!("  Program: {}", failure.instruction.program_id);
+                println!("  Stack depth: {}", failure.stack_depth);
+                println!("  Error code: {}", failure.result);
             }
         }
     }
@@ -172,21 +180,27 @@ fn test_execution_trace_on_error() {
         println!("\n🔍 Error Debugging Information:");
 
         if let Some(failure_instr) = result.execution_trace.instructions.last() {
-            println!("  Nesting level: {} (depth in CPI stack)", failure_instr.nesting_level);
-            println!("  Program that failed: {}", failure_instr.program_id);
-            println!("  Succeeded: {}", failure_instr.succeeded);
+            println!("  Stack depth: {} (depth in CPI stack)", failure_instr.stack_depth);
+            println!("  Program that failed: {}", failure_instr.instruction.program_id);
+            println!("  Result code: {}", failure_instr.result);
+            println!("  Accounts in instruction: {}", failure_instr.instruction.accounts.len());
+            println!("  Instruction data length: {} bytes", failure_instr.instruction.data.len());
         }
 
         let call_stack: Vec<_> = result.execution_trace.instructions.iter().collect();
         println!("\n  Full call stack ({} instructions):", call_stack.len());
         for (idx, instr) in call_stack.iter().enumerate() {
-            let indent = "    ".repeat(instr.nesting_level as usize);
-            let status = if instr.succeeded { "✓" } else { "✗" };
-            println!("    {}[{}] L{} {status} {}",
+            let indent = "    ".repeat(instr.stack_depth as usize);
+            let status = if instr.result == 0 {
+                "✅".to_string()
+            } else {
+                format!("❌({})", instr.result)
+            };
+            println!("    {}[{}] Depth={} {status} {}",
                 indent,
                 idx,
-                instr.nesting_level,
-                instr.program_id
+                instr.stack_depth,
+                instr.instruction.program_id
             );
         }
     }

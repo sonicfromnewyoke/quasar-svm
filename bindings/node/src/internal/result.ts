@@ -1,5 +1,5 @@
 import type { ExecutionStatus, ProgramError } from "../index.js";
-import type { InternalAccount, InternalResult, TokenBalance, InnerInstructions, ExecutionTrace } from "./types.js";
+import type { InternalAccount, InternalResult, TokenBalance, ExecutionTrace } from "./types.js";
 
 function hexKey(bytes: Uint8Array): string {
   return Buffer.from(bytes).toString("hex");
@@ -15,7 +15,6 @@ export class ExecutionResultBase {
   readonly postBalances: bigint[];
   readonly preTokenBalances: TokenBalance[];
   readonly postTokenBalances: TokenBalance[];
-  readonly innerInstructions: InnerInstructions[];
   readonly executionTrace: ExecutionTrace;
   /** @internal */ protected readonly _accounts: InternalAccount[];
   /** @internal */ private readonly _index: Map<string, number>;
@@ -30,7 +29,6 @@ export class ExecutionResultBase {
     this.postBalances = data.postBalances;
     this.preTokenBalances = data.preTokenBalances;
     this.postTokenBalances = data.postTokenBalances;
-    this.innerInstructions = data.innerInstructions;
     this.executionTrace = data.executionTrace;
     this._accounts = data.accounts;
     this._index = new Map();

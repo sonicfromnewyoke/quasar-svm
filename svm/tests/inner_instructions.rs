@@ -1,10 +1,9 @@
-/// Test inner instruction (CPI) capture
-
+/// Test execution trace with CPI capture
 use quasar_svm::token::{create_keyed_mint_account, create_keyed_associated_token_account, Mint};
 use quasar_svm::{QuasarSvm, Account, Pubkey, SPL_TOKEN_PROGRAM_ID};
 
 #[test]
-fn test_inner_instruction_capture() {
+fn test_execution_trace_with_cpis() {
     let mut svm = QuasarSvm::new();
 
     // Setup accounts
@@ -41,7 +40,7 @@ fn test_inner_instruction_capture() {
         100,
     ).unwrap();
 
-    println!("\n🧪 Testing Inner Instruction Capture\n");
+    println!("\n🧪 Testing Execution Trace with CPIs\n");
     println!("Executing SPL Token Transfer...");
 
     // Execute
@@ -59,54 +58,61 @@ fn test_inner_instruction_capture() {
     println!("\n📊 Execution Trace:");
     println!("  Total executed instructions: {}", result.execution_trace.instructions.len());
 
-    for (idx, instr) in result.execution_trace.instructions.iter().enumerate() {
-        let indent = "  ".repeat(instr.nesting_level as usize);
-        let status = if instr.succeeded { "✓" } else { "✗" };
-        println!("  [{}] {}L{} {status} → {}",
+    for (idx, exec_instr) in result.execution_trace.instructions.iter().enumerate() {
+        let indent = "  ".repeat(exec_instr.stack_depth as usize);
+        let status = if exec_instr.result == 0 { "✅" } else { "❌" };
+        println!("  [{}] {}Depth={} {status} → {}",
             idx,
             indent,
-            instr.nesting_level,
-            instr.program_id
+            exec_instr.stack_depth,
+            exec_instr.instruction.program_id
         );
+        println!("       {}  CUs: {}, Accounts: {}, Data: {} bytes",
+            indent,
+            exec_instr.compute_units_consumed,
+            exec_instr.instruction.accounts.len(),
+            exec_instr.instruction.data.len()
+        );
+    }
+
+    // Show CPI analysis
+    let cpis: Vec<_> = result.execution_trace.instructions.iter()
+        .filter(|i| i.stack_depth > 0)
+        .collect();
+
+    if !cpis.is_empty() {
+        println!("\n🔍 CPI Analysis:");
+        println!("  Found {} CPI(s):", cpis.len());
+        for cpi in &cpis {
+            println!("    Depth {}: {} ({} CUs)",
+                cpi.stack_depth,
+                cpi.instruction.program_id,
+                cpi.compute_units_consumed
+            );
+        }
+    } else {
+        println!("\n🔍 CPI Analysis:");
+        println!("  → No CPIs detected (direct instruction execution)");
     }
 
     if result.raw_result.is_err() {
         println!("\n❌ Execution halted at:");
         if let Some(last) = result.execution_trace.instructions.last() {
-            println!("  Program: {}", last.program_id);
-            println!("  Nesting level: {} (depth in CPI stack)", last.nesting_level);
+            println!("  Program: {}", last.instruction.program_id);
+            println!("  Stack depth: {} (depth in CPI stack)", last.stack_depth);
+            println!("  Error code: {}", last.result);
 
-            // Show call stack by filtering instructions with nesting <= current
+            // Show call stack by filtering instructions with depth <= current
             println!("\n  Call stack (parent callers):");
             let mut stack_instructions: Vec<_> = result.execution_trace.instructions.iter()
-                .filter(|i| i.nesting_level <= last.nesting_level)
+                .filter(|i| i.stack_depth <= last.stack_depth)
                 .collect();
             stack_instructions.reverse();
             for instr in stack_instructions.iter().take(5) {
-                println!("    L{} → {}", instr.nesting_level, instr.program_id);
+                println!("    Depth {} → {}", instr.stack_depth, instr.instruction.program_id);
             }
         }
     }
-
-    // Legacy inner instructions (for backwards compatibility)
-    println!("\n🔍 Legacy Inner Instructions (grouped by top-level):");
-    println!("  Count: {}", result.inner_instructions.len());
-    if result.inner_instructions.is_empty() {
-        println!("  → No CPIs detected (direct instruction execution)");
-    } else {
-        for inner_set in &result.inner_instructions {
-            println!("\n  Top-level instruction #{} had {} CPI(s):", inner_set.index, inner_set.instructions.len());
-            for (i, ix) in inner_set.instructions.iter().enumerate() {
-                println!("    [{}] Program ID index: {}", i, ix.program_id_index);
-                println!("        Accounts: {:?}", ix.accounts);
-                println!("        Data length: {} bytes", ix.data.len());
-            }
-        }
-    }
-
-    // Debug: Show raw structure
-    println!("\n🔧 Raw Structure:");
-    println!("  inner_instructions: {:?}", result.inner_instructions);
 
     println!("\n📝 Transaction Logs:");
     for log in &result.logs {
@@ -114,4 +120,8 @@ fn test_inner_instruction_capture() {
     }
 
     assert!(result.is_ok(), "Transfer should succeed");
+
+    // Verify execution trace structure
+    assert!(!result.execution_trace.instructions.is_empty(), "Should have at least one instruction");
+    assert_eq!(result.execution_trace.instructions[0].stack_depth, 0, "First instruction should be at depth 0");
 }

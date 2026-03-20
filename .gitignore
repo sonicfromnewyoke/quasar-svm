@@ -4,7 +4,6 @@
 /node_modules
 bindings/java
 bindings/go
-bindings/python
 bindings/ruby
 bindings/swift
 bindings/swift/.build
@@ -14,3 +13,9 @@ libquasar_svm*
 quasar_svm.dll
 .npmrc
 package-lock.json
+
+# Python
+bindings/python/.pytest_cache
+bindings/python/.venv
+bindings/python/quasar_svm.egg-info
+bindings/python/*/__pycache__
