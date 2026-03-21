@@ -5,9 +5,11 @@ PLATFORMS := darwin-arm64 darwin-x64 linux-x64-gnu linux-arm64-gnu win32-x64-msv
 RUST_TARGETS := aarch64-apple-darwin x86_64-apple-darwin x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu x86_64-pc-windows-gnu
 
 PYTHON_DIR := bindings/python
+GO_DIR := bindings/go
 
 .PHONY: build build-all clean copy-binary prepublish publish publish-platform version
 .PHONY: build-python-wheel publish-python clean-python link-python link-node dev-setup
+.PHONY: test-go link-go clean-go
 
 build:
 	cargo build --release -p quasar-svm-ffi
@@ -15,9 +17,9 @@ build:
 
 # Development setup: Create symlinks instead of copying binaries.
 # This makes development faster - build once, all bindings see the update.
-dev-setup: link-python link-node
+dev-setup: link-python link-node link-go
 	@echo "✅ Development environment ready!"
-	@echo "   Python and TypeScript bindings now use symlinks to target/release/"
+	@echo "   Python, TypeScript, and Go bindings now use symlinks to target/release/"
 	@echo "   Just run 'cargo build --release' and all bindings are updated."
 
 # Create symlink for Python bindings (development only).
@@ -58,6 +60,26 @@ else
 	ln -sf ../../target/release/libquasar_svm.so bindings/node/libquasar_svm.so
 	@echo "✅ Node.js: Linked libquasar_svm.so"
 endif
+
+# Create symlink for Go bindings (development only).
+# Go uses CGo with -lquasar_svm, so we symlink the library into the Go dir
+# so the rpath in the #cgo directive resolves correctly.
+link-go:
+	@echo "Setting up Go bindings..."
+	@cd $(GO_DIR) && go mod tidy
+	@echo "✅ Go: Ready (CGo links against target/release/ via rpath)"
+
+# Run Go binding tests.
+test-go: build
+	cd $(GO_DIR) && CGO_LDFLAGS="-L../../target/release" go test -v -count=1 .
+
+# Run Go binding tests without rebuilding the native library.
+test-go-only:
+	cd $(GO_DIR) && CGO_LDFLAGS="-L../../target/release" go test -v -count=1 .
+
+# Clean Go build cache for this module.
+clean-go:
+	cd $(GO_DIR) && go clean -cache -testcache
 
 # Build native libraries for all platforms, copy to package root + npm dirs.
 build-all:
