@@ -251,7 +251,7 @@ func main() {
 | **Python** | [bindings/python/README.md](bindings/python/README.md) | Python API using `solders` types (`Pubkey`, `Instruction`, `AccountMeta`) |
 | **web3.js** | [bindings/node/src/web3.js/README.md](bindings/node/src/web3.js/README.md) | TypeScript API using `@solana/web3.js` types (`PublicKey`, `KeyedAccountInfo`) |
 | **kit** | [bindings/node/src/kit/README.md](bindings/node/src/kit/README.md) | TypeScript API using `@solana/kit` types (`Address`, `Account<T>`) |
-| **Go** | [bindings/go/](bindings/go/) | Go API using `gagliardetto/solana-go` types (`PublicKey`) |
+| **Go** | [bindings/go/README.md](bindings/go/README.md) | Go API using `gagliardetto/solana-go` types (`PublicKey`) |
 
 ## Exports
 
