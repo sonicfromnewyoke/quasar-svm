@@ -2,12 +2,14 @@ package quasarsvm
 
 import (
 	"encoding/binary"
+	"errors"
 	"testing"
 
 	"github.com/gagliardetto/solana-go"
 )
 
 func TestNewAndFree(t *testing.T) {
+	t.Parallel()
 	svm, err := NewWithoutPrograms()
 	if err != nil {
 		t.Fatalf("NewWithoutPrograms: %v", err)
@@ -20,6 +22,7 @@ func TestNewAndFree(t *testing.T) {
 }
 
 func TestNewWithPrograms(t *testing.T) {
+	t.Parallel()
 	svm, err := New()
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -28,6 +31,7 @@ func TestNewWithPrograms(t *testing.T) {
 }
 
 func TestSetClock(t *testing.T) {
+	t.Parallel()
 	svm, err := NewWithoutPrograms()
 	if err != nil {
 		t.Fatalf("NewWithoutPrograms: %v", err)
@@ -47,6 +51,7 @@ func TestSetClock(t *testing.T) {
 }
 
 func TestWarpToSlot(t *testing.T) {
+	t.Parallel()
 	svm, err := NewWithoutPrograms()
 	if err != nil {
 		t.Fatalf("NewWithoutPrograms: %v", err)
@@ -59,6 +64,7 @@ func TestWarpToSlot(t *testing.T) {
 }
 
 func TestSetComputeBudget(t *testing.T) {
+	t.Parallel()
 	svm, err := NewWithoutPrograms()
 	if err != nil {
 		t.Fatalf("NewWithoutPrograms: %v", err)
@@ -71,6 +77,7 @@ func TestSetComputeBudget(t *testing.T) {
 }
 
 func TestProcessInstruction(t *testing.T) {
+	t.Parallel()
 	svm, err := New()
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -85,9 +92,7 @@ func TestProcessInstruction(t *testing.T) {
 		Decimals:      6,
 	})
 
-	// GetAccountDataSize instruction (opcode 21)
-	data := make([]byte, 1)
-	data[0] = 21
+	data := []byte{21} // GetAccountDataSize
 
 	ix := Instruction{
 		ProgramID: solana.TokenProgramID,
@@ -120,6 +125,7 @@ func TestProcessInstruction(t *testing.T) {
 }
 
 func TestExecutionTrace(t *testing.T) {
+	t.Parallel()
 	svm, err := New()
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -164,6 +170,7 @@ func TestExecutionTrace(t *testing.T) {
 }
 
 func TestWireRoundtrip(t *testing.T) {
+	t.Parallel()
 	// Test instruction serialization
 	ix := Instruction{
 		ProgramID: solana.TokenProgramID,
@@ -199,18 +206,20 @@ func TestWireRoundtrip(t *testing.T) {
 }
 
 func TestUseAfterFree(t *testing.T) {
+	t.Parallel()
 	svm, err := NewWithoutPrograms()
 	if err != nil {
 		t.Fatalf("NewWithoutPrograms: %v", err)
 	}
 	svm.Free()
 
-	if err := svm.WarpToSlot(100); err == nil {
-		t.Fatal("expected error on use after free")
+	if err := svm.WarpToSlot(100); !errors.Is(err, ErrFreed) {
+		t.Fatalf("expected ErrFreed, got %v", err)
 	}
 }
 
 func TestAddProgramEmptyELF(t *testing.T) {
+	t.Parallel()
 	svm, err := NewWithoutPrograms()
 	if err != nil {
 		t.Fatalf("NewWithoutPrograms: %v", err)
@@ -218,12 +227,13 @@ func TestAddProgramEmptyELF(t *testing.T) {
 	defer svm.Free()
 
 	err = svm.AddProgram(solana.NewWallet().PublicKey(), []byte{}, LoaderV3)
-	if err == nil {
-		t.Fatal("expected error on empty ELF")
+	if !errors.Is(err, ErrEmptyELF) {
+		t.Fatalf("expected ErrEmptyELF, got %v", err)
 	}
 }
 
 func TestNewMintAccount(t *testing.T) {
+	t.Parallel()
 	authority := solana.NewWallet().PublicKey()
 	address := solana.NewWallet().PublicKey()
 
@@ -248,6 +258,7 @@ func TestNewMintAccount(t *testing.T) {
 }
 
 func TestNewTokenAccount(t *testing.T) {
+	t.Parallel()
 	mintAddr := solana.NewWallet().PublicKey()
 	owner := solana.NewWallet().PublicKey()
 	address := solana.NewWallet().PublicKey()

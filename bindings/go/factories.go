@@ -138,11 +138,8 @@ func newTokenAccountWithProgram(address solana.PublicKey, cfg TokenAccountConfig
 	// is_native: None
 	off += 4 + 8
 
-	// delegated_amount: 0
-	off += 8
-
-	// close_authority: None
-	// (already zeroed)
+	// delegated_amount: 0 (already zeroed)
+	// close_authority: None (already zeroed)
 
 	lamports := rentMinimumBalance(165)
 
@@ -159,6 +156,7 @@ func newTokenAccountWithProgram(address solana.PublicKey, cfg TokenAccountConfig
 func rentMinimumBalance(dataLen uint64) uint64 {
 	const lamportsPerByteYear uint64 = 3480
 	const exemptionYears uint64 = 2
-	accountSize := dataLen + 128 // account storage overhead
+	const accountStorageOverhead uint64 = 128
+	accountSize := dataLen + accountStorageOverhead
 	return accountSize * lamportsPerByteYear * exemptionYears
 }

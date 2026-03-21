@@ -5,33 +5,69 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"sync"
 
 	"github.com/gagliardetto/solana-go"
 )
 
-// serializeInstructions encodes instructions into the wire format.
-func serializeInstructions(ixs []Instruction) []byte {
-	// Pre-calculate exact size: 4 (count) + per-ix (32 + 4 + dataLen + 4 + metas*34)
-	size := 4
+var bufPool = sync.Pool{
+	New: func() any {
+		b := make([]byte, 0, 1024)
+		return &b
+	},
+}
+
+func getBuf(size int) *[]byte {
+	bp := bufPool.Get().(*[]byte)
+	if cap(*bp) < size {
+		*bp = make([]byte, 0, size)
+	}
+	*bp = (*bp)[:0]
+	return bp
+}
+
+func putBuf(bp *[]byte) {
+	bufPool.Put(bp)
+}
+
+// instructionsSize returns the wire size for the given instructions.
+func instructionsSize(ixs []Instruction) int {
+	size := 4 // count prefix
 	for i := range ixs {
 		size += 32 + 4 + len(ixs[i].Data) + 4 + len(ixs[i].Accounts)*34
 	}
+	return size
+}
 
-	buf := make([]byte, 0, size)
+// accountsSize returns the wire size for the given accounts.
+func accountsSize(accounts []Account) int {
+	size := 4 // count prefix
+	for i := range accounts {
+		size += 77 + len(accounts[i].Data)
+	}
+	return size
+}
 
-	// Count prefix
+// serializeInstructions encodes instructions into the wire format.
+func serializeInstructions(ixs []Instruction) []byte {
+	buf := make([]byte, 0, instructionsSize(ixs))
+	return appendInstructions(buf, ixs)
+}
+
+// serializeAccounts encodes accounts into the wire format.
+func serializeAccounts(accounts []Account) []byte {
+	buf := make([]byte, 0, accountsSize(accounts))
+	return appendAccounts(buf, accounts)
+}
+
+// appendInstructions appends the wire-encoded instructions to buf.
+func appendInstructions(buf []byte, ixs []Instruction) []byte {
 	buf = binary.LittleEndian.AppendUint32(buf, uint32(len(ixs)))
-
 	for i := range ixs {
 		ix := &ixs[i]
-		// Program ID (32 bytes)
 		buf = append(buf, ix.ProgramID[:]...)
-
-		// Data (length-prefixed)
 		buf = binary.LittleEndian.AppendUint32(buf, uint32(len(ix.Data)))
 		buf = append(buf, ix.Data...)
-
-		// Account metas
 		buf = binary.LittleEndian.AppendUint32(buf, uint32(len(ix.Accounts)))
 		for j := range ix.Accounts {
 			buf = append(buf, ix.Accounts[j].PublicKey[:]...)
@@ -39,23 +75,12 @@ func serializeInstructions(ixs []Instruction) []byte {
 			buf = appendBool(buf, ix.Accounts[j].IsWritable)
 		}
 	}
-
 	return buf
 }
 
-// serializeAccounts encodes accounts into the wire format.
-func serializeAccounts(accounts []Account) []byte {
-	// Pre-calculate exact size: 4 (count) + per-acct (32 + 32 + 8 + 4 + dataLen + 1)
-	size := 4
-	for i := range accounts {
-		size += 77 + len(accounts[i].Data)
-	}
-
-	buf := make([]byte, 0, size)
-
-	// Count prefix
+// appendAccounts appends the wire-encoded accounts to buf.
+func appendAccounts(buf []byte, accounts []Account) []byte {
 	buf = binary.LittleEndian.AppendUint32(buf, uint32(len(accounts)))
-
 	for i := range accounts {
 		acct := &accounts[i]
 		buf = append(buf, acct.Address[:]...)
@@ -65,7 +90,6 @@ func serializeAccounts(accounts []Account) []byte {
 		buf = append(buf, acct.Data...)
 		buf = appendBool(buf, acct.Executable)
 	}
-
 	return buf
 }
 
@@ -92,8 +116,8 @@ func deserializeResult(data []byte) (*ExecutionResult, error) {
 		return nil, fmt.Errorf("reading return data: %w", err)
 	}
 
-	// Accounts
-	numAccounts, err := r.readU32()
+	// Accounts (min 77 bytes each: 32 addr + 32 owner + 8 lamports + 4 data_len + 1 executable)
+	numAccounts, err := r.readCount(77)
 	if err != nil {
 		return nil, fmt.Errorf("reading account count: %w", err)
 	}
@@ -128,8 +152,8 @@ func deserializeResult(data []byte) (*ExecutionResult, error) {
 		}
 	}
 
-	// Logs
-	numLogs, err := r.readU32()
+	// Logs (min 4 bytes each: length prefix)
+	numLogs, err := r.readCount(4)
 	if err != nil {
 		return nil, fmt.Errorf("reading log count: %w", err)
 	}
@@ -157,8 +181,8 @@ func deserializeResult(data []byte) (*ExecutionResult, error) {
 		errorMessage = &msg
 	}
 
-	// Pre-balances
-	numPreBalances, err := r.readU32()
+	// Pre-balances (8 bytes each)
+	numPreBalances, err := r.readCount(8)
 	if err != nil {
 		return nil, fmt.Errorf("reading pre-balance count: %w", err)
 	}
@@ -170,8 +194,8 @@ func deserializeResult(data []byte) (*ExecutionResult, error) {
 		}
 	}
 
-	// Post-balances
-	numPostBalances, err := r.readU32()
+	// Post-balances (8 bytes each)
+	numPostBalances, err := r.readCount(8)
 	if err != nil {
 		return nil, fmt.Errorf("reading post-balance count: %w", err)
 	}
@@ -195,8 +219,8 @@ func deserializeResult(data []byte) (*ExecutionResult, error) {
 		return nil, fmt.Errorf("reading post-token balances: %w", err)
 	}
 
-	// Execution trace
-	numInstructions, err := r.readU32()
+	// Execution trace (min 57 bytes each: 1 depth + 32 program + 4 accts + 4 data_len + 8 cu + 8 result)
+	numInstructions, err := r.readCount(57)
 	if err != nil {
 		return nil, fmt.Errorf("reading trace count: %w", err)
 	}
@@ -211,7 +235,7 @@ func deserializeResult(data []byte) (*ExecutionResult, error) {
 		if err != nil {
 			return nil, fmt.Errorf("reading trace %d program ID: %w", i, err)
 		}
-		numAcctMetas, err := r.readU32()
+		numAcctMetas, err := r.readCount(34) // 32 pubkey + 1 is_signer + 1 is_writable
 		if err != nil {
 			return nil, fmt.Errorf("reading trace %d account count: %w", i, err)
 		}
@@ -278,7 +302,8 @@ func deserializeResult(data []byte) (*ExecutionResult, error) {
 }
 
 func readTokenBalances(r *reader) ([]TokenBalance, error) {
-	count, err := r.readU32()
+	// min 14 bytes each: 4 index + 4 mint_len + 1 has_owner + 1 decimals + 4 amount_len
+	count, err := r.readCount(14)
 	if err != nil {
 		return nil, err
 	}
@@ -343,7 +368,12 @@ func readTokenBalances(r *reader) ([]TokenBalance, error) {
 	return balances, nil
 }
 
-var errUnexpectedEOF = errors.New("unexpected end of wire data")
+var (
+	// ErrUnexpectedEOF is returned when the wire data is truncated.
+	ErrUnexpectedEOF = errors.New("unexpected end of wire data")
+	// ErrCountOverflow is returned when a count field exceeds remaining data.
+	ErrCountOverflow = errors.New("wire count exceeds remaining data")
+)
 
 // reader is a binary reader for the wire format with bounds checking.
 type reader struct {
@@ -357,7 +387,7 @@ func (r *reader) remaining() int {
 
 func (r *reader) readBytes(n int) ([]byte, error) {
 	if r.remaining() < n {
-		return nil, errUnexpectedEOF
+		return nil, ErrUnexpectedEOF
 	}
 	// Return a sub-slice of the underlying data (already copied from FFI buffer).
 	b := r.data[r.pos : r.pos+n]
@@ -367,7 +397,7 @@ func (r *reader) readBytes(n int) ([]byte, error) {
 
 func (r *reader) readU8() (uint8, error) {
 	if r.remaining() < 1 {
-		return 0, errUnexpectedEOF
+		return 0, ErrUnexpectedEOF
 	}
 	v := r.data[r.pos]
 	r.pos++
@@ -381,7 +411,7 @@ func (r *reader) readBool() (bool, error) {
 
 func (r *reader) readU32() (uint32, error) {
 	if r.remaining() < 4 {
-		return 0, errUnexpectedEOF
+		return 0, ErrUnexpectedEOF
 	}
 	v := binary.LittleEndian.Uint32(r.data[r.pos:])
 	r.pos += 4
@@ -395,7 +425,7 @@ func (r *reader) readI32() (int32, error) {
 
 func (r *reader) readU64() (uint64, error) {
 	if r.remaining() < 8 {
-		return 0, errUnexpectedEOF
+		return 0, ErrUnexpectedEOF
 	}
 	v := binary.LittleEndian.Uint64(r.data[r.pos:])
 	r.pos += 8
@@ -412,7 +442,7 @@ func (r *reader) readF64() (float64, error) {
 
 func (r *reader) readPubkey() (solana.PublicKey, error) {
 	if r.remaining() < 32 {
-		return solana.PublicKey{}, errUnexpectedEOF
+		return solana.PublicKey{}, ErrUnexpectedEOF
 	}
 	var pk solana.PublicKey
 	copy(pk[:], r.data[r.pos:r.pos+32])
@@ -426,6 +456,19 @@ func (r *reader) readLengthPrefixed() ([]byte, error) {
 		return nil, err
 	}
 	return r.readBytes(int(n))
+}
+
+// readCount reads a u32 count and validates that at least count * minBytesPerItem
+// bytes remain in the buffer, preventing OOM from corrupted count fields.
+func (r *reader) readCount(minBytesPerItem int) (uint32, error) {
+	n, err := r.readU32()
+	if err != nil {
+		return 0, err
+	}
+	if minBytesPerItem > 0 && int(n) > r.remaining()/minBytesPerItem {
+		return 0, ErrCountOverflow
+	}
+	return n, nil
 }
 
 func appendBool(buf []byte, v bool) []byte {

@@ -2,73 +2,21 @@
 // Solana virtual machine that executes transactions locally without an RPC
 // connection. It uses github.com/gagliardetto/solana-go for Solana types.
 //
-// The native library (libquasar_svm) must be built before using this package:
+// Prebuilt static libraries are vendored under libquasar_svm_vendor/ for
+// supported platforms. Consumers can simply `go get` without any native
+// dependencies.
 //
-//	cargo build --release -p quasar-svm-ffi
+// For development builds (monorepo), set the quasar_dev build tag:
 //
-// Set CGO_LDFLAGS and CGO_CFLAGS if the library is not in the default search path:
+//	go test -tags quasar_dev ./...
 //
-//	export CGO_LDFLAGS="-L/path/to/target/release"
-//	export CGO_CFLAGS="-I/path/to/include"
+// For dynamic linking against a system-installed libquasar_svm:
+//
+//	go build -tags dynamic ./...
 package quasarsvm
 
 /*
-#cgo LDFLAGS: -lquasar_svm
-#cgo darwin LDFLAGS: -Wl,-rpath,${SRCDIR}/../../target/release
-#cgo linux LDFLAGS: -Wl,-rpath,${SRCDIR}/../../target/release
-
-#include <stdint.h>
-#include <stdbool.h>
-#include <stdlib.h>
-
-typedef struct QuasarSvm QuasarSvm;
-
-const char *quasar_last_error(void);
-QuasarSvm *quasar_svm_new(void);
-void quasar_svm_free(QuasarSvm *svm);
-
-int32_t quasar_svm_add_program(
-    QuasarSvm *svm,
-    const uint8_t (*program_id)[32],
-    const uint8_t *elf_data,
-    uint64_t elf_len,
-    uint8_t loader_version
-);
-
-int32_t quasar_svm_set_clock(
-    QuasarSvm *svm,
-    uint64_t slot,
-    int64_t epoch_start_timestamp,
-    uint64_t epoch,
-    uint64_t leader_schedule_epoch,
-    int64_t unix_timestamp
-);
-
-int32_t quasar_svm_warp_to_slot(QuasarSvm *svm, uint64_t slot);
-int32_t quasar_svm_set_rent(QuasarSvm *svm, uint64_t lamports_per_byte_year);
-
-int32_t quasar_svm_set_epoch_schedule(
-    QuasarSvm *svm,
-    uint64_t slots_per_epoch,
-    uint64_t leader_schedule_slot_offset,
-    bool warmup,
-    uint64_t first_normal_epoch,
-    uint64_t first_normal_slot
-);
-
-int32_t quasar_svm_set_compute_budget(QuasarSvm *svm, uint64_t max_units);
-
-int32_t quasar_svm_process_transaction(
-    QuasarSvm *svm,
-    const uint8_t *instructions,
-    uint64_t instructions_len,
-    const uint8_t *accounts,
-    uint64_t accounts_len,
-    uint8_t **result_out,
-    uint64_t *result_len_out
-);
-
-void quasar_result_free(uint8_t *result, uint64_t result_len);
+#include "select_quasar_svm.h"
 */
 import "C"
 
@@ -78,18 +26,24 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sync"
 	"unsafe"
 
 	"github.com/gagliardetto/solana-go"
 )
 
 var (
-	errFreed    = errors.New("quasar-svm: use after Free")
-	errEmptyELF = errors.New("quasar-svm: empty ELF data")
+	// ErrFreed is returned when a method is called on a freed QuasarSVM.
+	ErrFreed = errors.New("quasar-svm: use after Free")
+	// ErrEmptyELF is returned when an empty ELF byte slice is passed to AddProgram.
+	ErrEmptyELF = errors.New("quasar-svm: empty ELF data")
 )
 
 // QuasarSVM is a lightweight Solana virtual machine for local transaction execution.
+// It is safe to call Free concurrently with other methods; all methods acquire a
+// read lock and Free acquires a write lock, so no use-after-free is possible.
 type QuasarSVM struct {
+	mu    sync.RWMutex
 	ptr   *C.QuasarSvm
 	freed bool
 }
@@ -142,8 +96,11 @@ func NewWithoutPrograms() (*QuasarSVM, error) {
 	return svm, nil
 }
 
-// Free releases the native SVM resources. Safe to call multiple times.
+// Free releases the native SVM resources. Safe to call multiple times and
+// from multiple goroutines.
 func (s *QuasarSVM) Free() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if !s.freed && s.ptr != nil {
 		C.quasar_svm_free(s.ptr)
 		s.freed = true
@@ -153,18 +110,20 @@ func (s *QuasarSVM) Free() {
 
 func (s *QuasarSVM) ensureAlive() error {
 	if s.freed {
-		return errFreed
+		return ErrFreed
 	}
 	return nil
 }
 
 // AddProgram loads a BPF program into the SVM.
 func (s *QuasarSVM) AddProgram(programID solana.PublicKey, elf []byte, loaderVersion uint8) error {
+	if len(elf) == 0 {
+		return ErrEmptyELF
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	if err := s.ensureAlive(); err != nil {
 		return err
-	}
-	if len(elf) == 0 {
-		return errEmptyELF
 	}
 	id := programID
 	code := C.quasar_svm_add_program(
@@ -179,6 +138,8 @@ func (s *QuasarSVM) AddProgram(programID solana.PublicKey, elf []byte, loaderVer
 
 // SetClock configures the Clock sysvar.
 func (s *QuasarSVM) SetClock(clock Clock) error {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	if err := s.ensureAlive(); err != nil {
 		return err
 	}
@@ -195,6 +156,8 @@ func (s *QuasarSVM) SetClock(clock Clock) error {
 
 // WarpToSlot advances the SVM to a future slot.
 func (s *QuasarSVM) WarpToSlot(slot uint64) error {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	if err := s.ensureAlive(); err != nil {
 		return err
 	}
@@ -203,6 +166,8 @@ func (s *QuasarSVM) WarpToSlot(slot uint64) error {
 
 // SetRent configures the Rent sysvar.
 func (s *QuasarSVM) SetRent(lamportsPerByteYear uint64) error {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	if err := s.ensureAlive(); err != nil {
 		return err
 	}
@@ -211,6 +176,8 @@ func (s *QuasarSVM) SetRent(lamportsPerByteYear uint64) error {
 
 // SetEpochSchedule configures the EpochSchedule sysvar.
 func (s *QuasarSVM) SetEpochSchedule(schedule EpochSchedule) error {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	if err := s.ensureAlive(); err != nil {
 		return err
 	}
@@ -227,6 +194,8 @@ func (s *QuasarSVM) SetEpochSchedule(schedule EpochSchedule) error {
 
 // SetComputeBudget sets the maximum compute units for execution.
 func (s *QuasarSVM) SetComputeBudget(maxUnits uint64) error {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	if err := s.ensureAlive(); err != nil {
 		return err
 	}
@@ -242,16 +211,26 @@ func (s *QuasarSVM) ProcessInstruction(ix Instruction, accounts []Account) (*Exe
 
 // ProcessInstructionChain executes multiple instructions atomically.
 func (s *QuasarSVM) ProcessInstructionChain(ixs []Instruction, accounts []Account) (*ExecutionResult, error) {
+	// Serialize into pooled buffers to avoid per-call allocations.
+	ixBufp := getBuf(instructionsSize(ixs))
+	*ixBufp = appendInstructions(*ixBufp, ixs)
+
+	acctBufp := getBuf(accountsSize(accounts))
+	*acctBufp = appendAccounts(*acctBufp, accounts)
+
+	s.mu.RLock()
 	if err := s.ensureAlive(); err != nil {
+		s.mu.RUnlock()
+		putBuf(ixBufp)
+		putBuf(acctBufp)
 		return nil, err
 	}
-
-	ixBuf := serializeInstructions(ixs)
-	acctBuf := serializeAccounts(accounts)
 
 	var resultPtr *C.uint8_t
 	var resultLen C.uint64_t
 
+	ixBuf := *ixBufp
+	acctBuf := *acctBufp
 	code := C.quasar_svm_process_transaction(
 		s.ptr,
 		(*C.uint8_t)(unsafe.Pointer(&ixBuf[0])),
@@ -262,12 +241,26 @@ func (s *QuasarSVM) ProcessInstructionChain(ixs []Instruction, accounts []Accoun
 		&resultLen,
 	)
 
-	if err := s.check(code); err != nil {
-		return nil, err
+	// Read error while still holding the lock — lastError() reads FFI
+	// thread-local state that another goroutine could clobber after unlock.
+	var ffiErr error
+	if code != 0 {
+		ffiErr = fmt.Errorf("quasar-svm error (%d): %s", code, lastError())
+	}
+	s.mu.RUnlock()
+
+	// Return pooled buffers now that CGo is done with them.
+	putBuf(ixBufp)
+	putBuf(acctBufp)
+
+	if ffiErr != nil {
+		return nil, ffiErr
 	}
 
-	// Copy the result data before freeing the FFI buffer
-	goBytes := C.GoBytes(unsafe.Pointer(resultPtr), C.int(resultLen))
+	// Copy the result data before freeing the FFI buffer.
+	// Use unsafe.Slice instead of C.GoBytes to avoid truncating uint64 to int.
+	goBytes := make([]byte, resultLen)
+	copy(goBytes, unsafe.Slice((*byte)(unsafe.Pointer(resultPtr)), resultLen))
 	C.quasar_result_free(resultPtr, resultLen)
 
 	return deserializeResult(goBytes)
@@ -339,10 +332,10 @@ func findProgramsDir() string {
 		return dir
 	}
 
-	// 2. Relative to this source file (for development in the monorepo)
-	// bindings/go/ -> ../../svm/programs/
-	_, thisFile, _, _ := runtime.Caller(0)
-	if thisFile != "" {
+	// 2. Relative to this source file (works during `go test` in the monorepo).
+	// After compilation this path won't exist, so we check with Stat.
+	_, thisFile, _, ok := runtime.Caller(0)
+	if ok && thisFile != "" {
 		dir := filepath.Join(filepath.Dir(thisFile), "..", "..", "svm", "programs")
 		if info, err := os.Stat(dir); err == nil && info.IsDir() {
 			return dir

@@ -171,8 +171,9 @@ with QuasarSvm() as svm:
 package main
 
 import (
-	"fmt"
 	"encoding/binary"
+	"fmt"
+	"log"
 
 	"github.com/gagliardetto/solana-go"
 	quasar "github.com/blueshift-gg/quasar-svm/bindings/go"
@@ -182,20 +183,29 @@ func main() {
 	svm, _ := quasar.New() // Token program loaded by default
 	defer svm.Free()
 
-	authority := solana.NewWallet().PublicKey()
-	recipient := solana.NewWallet().PublicKey()
+	// Generate keypairs using solana-go
+	authorityKey, _ := solana.NewRandomPrivateKey()
+	authority := authorityKey.PublicKey()
+
+	recipientKey, _ := solana.NewRandomPrivateKey()
+	recipient := recipientKey.PublicKey()
+
+	mintKey, _ := solana.NewRandomPrivateKey()
+	mintAddr := mintKey.PublicKey()
+
+	aliceAtaKey, _ := solana.NewRandomPrivateKey()
+	bobAtaKey, _ := solana.NewRandomPrivateKey()
 
 	// Create mint and token accounts
-	mintAddr := solana.NewWallet().PublicKey()
 	mint := quasar.NewMintAccount(mintAddr, quasar.MintConfig{
 		MintAuthority: &authority,
 		Decimals:      6,
 		Supply:        10_000,
 	})
-	alice := quasar.NewTokenAccount(solana.NewWallet().PublicKey(), quasar.TokenAccountConfig{
+	alice := quasar.NewTokenAccount(aliceAtaKey.PublicKey(), quasar.TokenAccountConfig{
 		Mint: mintAddr, Owner: authority, Amount: 5_000,
 	})
-	bob := quasar.NewTokenAccount(solana.NewWallet().PublicKey(), quasar.TokenAccountConfig{
+	bob := quasar.NewTokenAccount(bobAtaKey.PublicKey(), quasar.TokenAccountConfig{
 		Mint: mintAddr, Owner: recipient, Amount: 0,
 	})
 
@@ -205,7 +215,7 @@ func main() {
 	binary.LittleEndian.PutUint64(data[1:], 1_000)
 
 	ix := quasar.Instruction{
-		ProgramID: quasar.SPLTokenProgramID,
+		ProgramID: solana.TokenProgramID,
 		Accounts: []quasar.AccountMeta{
 			{PublicKey: alice.Address, IsSigner: false, IsWritable: true},
 			{PublicKey: bob.Address, IsSigner: false, IsWritable: true},
@@ -214,9 +224,12 @@ func main() {
 		Data: data,
 	}
 
-	result, _ := svm.ProcessInstruction(ix, []quasar.Account{mint, alice, bob})
+	result, err := svm.ProcessInstruction(ix, []quasar.Account{mint, alice, bob})
+	if err != nil {
+		log.Fatal(err)
+	}
 
-	fmt.Println("Success:", result.IsOk())
+	fmt.Println("Success:", result.OK())
 	fmt.Println("Compute units:", result.ComputeUnits)
 	for _, log := range result.Logs {
 		fmt.Println(log)
@@ -260,7 +273,7 @@ All APIs expose the same core functionality with idiomatic types for each langua
 | `quasar-svm-ffi` | `ffi/` | C-ABI wrapper for language bindings |
 | Python bindings | `bindings/python/` | Python API using `solders` for Solana types |
 | TypeScript bindings | `bindings/node/` | `web3.js` and `kit` API layers over the native engine |
-| Go bindings | `bindings/go/` | Go API using `gagliardetto/solana-go` via CGo |
+| Go bindings | `bindings/go/` | Go API using `gagliardetto/solana-go` via CGo (prebuilt libs bundled) |
 
 ## Built-in Programs
 
@@ -310,9 +323,13 @@ cargo clippy --workspace
 npm run build
 npm run build:native
 
-# Go (requires native library built first)
+# Go (dev mode — links against target/release/)
 cargo build --release -p quasar-svm-ffi
 make test-go
+
+# Go (bundle prebuilt libs for distribution)
+make build-all       # builds all platforms
+make build-go-all    # copies into bindings/go/lib/
 ```
 
 ## License

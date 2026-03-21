@@ -1,6 +1,6 @@
 module github.com/blueshift-gg/quasar-svm/bindings/go
 
-go 1.22
+go 1.24
 
 require github.com/gagliardetto/solana-go v1.12.0
 

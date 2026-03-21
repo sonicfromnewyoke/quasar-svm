@@ -9,7 +9,7 @@ GO_DIR := bindings/go
 
 .PHONY: build build-all clean copy-binary prepublish publish publish-platform version
 .PHONY: build-python-wheel publish-python clean-python link-python link-node dev-setup
-.PHONY: test-go link-go clean-go
+.PHONY: test-go link-go clean-go build-go-all build-go-local clean-go-libs
 
 build:
 	cargo build --release -p quasar-svm-ffi
@@ -69,17 +69,57 @@ link-go:
 	@cd $(GO_DIR) && go mod tidy
 	@echo "✅ Go: Ready (CGo links against target/release/ via rpath)"
 
-# Run Go binding tests.
+# Run Go binding tests (dev mode — links against target/release/).
 test-go: build
-	cd $(GO_DIR) && CGO_LDFLAGS="-L../../target/release" go test -v -count=1 .
+	cd $(GO_DIR) && go test -tags quasar_dev -v -count=1 .
 
 # Run Go binding tests without rebuilding the native library.
 test-go-only:
-	cd $(GO_DIR) && CGO_LDFLAGS="-L../../target/release" go test -v -count=1 .
+	cd $(GO_DIR) && go test -tags quasar_dev -v -count=1 .
 
 # Clean Go build cache for this module.
 clean-go:
 	cd $(GO_DIR) && go clean -cache -testcache
+
+# Build Go bindings with vendored static libraries for all platforms.
+# This copies prebuilt .a files into libquasar_svm_vendor/ so consumers
+# can `go get` without needing Rust/Cargo or any runtime dependencies.
+build-go-all:
+	@echo "Copying static libraries into Go vendor directory..."
+	cp target/aarch64-apple-darwin/release/libquasar_svm.a  $(GO_DIR)/libquasar_svm_vendor/libquasar_svm_darwin_arm64.a
+	cp target/x86_64-apple-darwin/release/libquasar_svm.a   $(GO_DIR)/libquasar_svm_vendor/libquasar_svm_darwin_amd64.a
+	cp target/x86_64-unknown-linux-gnu/release/libquasar_svm.a $(GO_DIR)/libquasar_svm_vendor/libquasar_svm_linux_amd64.a
+	cp target/aarch64-unknown-linux-gnu/release/libquasar_svm.a $(GO_DIR)/libquasar_svm_vendor/libquasar_svm_linux_arm64.a
+	cp target/x86_64-pc-windows-gnu/release/libquasar_svm.a $(GO_DIR)/libquasar_svm_vendor/libquasar_svm_windows_amd64.a
+	@echo "✅ Go: Static libraries vendored for all platforms"
+	@ls -lh $(GO_DIR)/libquasar_svm_vendor/*.a
+
+# Copy the current platform's static library into the Go vendor directory.
+build-go-local: build
+ifeq ($(shell uname -s),Darwin)
+ifeq ($(shell uname -m),arm64)
+	cp target/release/libquasar_svm.a $(GO_DIR)/libquasar_svm_vendor/libquasar_svm_darwin_arm64.a
+	@echo "✅ Go: Vendored libquasar_svm.a (darwin/arm64)"
+else
+	cp target/release/libquasar_svm.a $(GO_DIR)/libquasar_svm_vendor/libquasar_svm_darwin_amd64.a
+	@echo "✅ Go: Vendored libquasar_svm.a (darwin/amd64)"
+endif
+else ifeq ($(OS),Windows_NT)
+	cp target/release/libquasar_svm.a $(GO_DIR)/libquasar_svm_vendor/libquasar_svm_windows_amd64.a
+	@echo "✅ Go: Vendored libquasar_svm.a (windows/amd64)"
+else
+ifeq ($(shell uname -m),aarch64)
+	cp target/release/libquasar_svm.a $(GO_DIR)/libquasar_svm_vendor/libquasar_svm_linux_arm64.a
+	@echo "✅ Go: Vendored libquasar_svm.a (linux/arm64)"
+else
+	cp target/release/libquasar_svm.a $(GO_DIR)/libquasar_svm_vendor/libquasar_svm_linux_amd64.a
+	@echo "✅ Go: Vendored libquasar_svm.a (linux/amd64)"
+endif
+endif
+
+# Clean Go vendored static libraries.
+clean-go-libs:
+	rm -f $(GO_DIR)/libquasar_svm_vendor/*.a
 
 # Build native libraries for all platforms, copy to package root + npm dirs.
 build-all:
@@ -98,6 +138,11 @@ build-all:
 	cp target/x86_64-unknown-linux-gnu/release/libquasar_svm.so npm/linux-x64-gnu/libquasar_svm.so
 	cp target/aarch64-unknown-linux-gnu/release/libquasar_svm.so npm/linux-arm64-gnu/libquasar_svm.so
 	cp target/x86_64-pc-windows-gnu/release/quasar_svm.dll      npm/win32-x64-msvc/quasar_svm.dll
+	cp target/aarch64-apple-darwin/release/libquasar_svm.a  $(GO_DIR)/libquasar_svm_vendor/libquasar_svm_darwin_arm64.a
+	cp target/x86_64-apple-darwin/release/libquasar_svm.a   $(GO_DIR)/libquasar_svm_vendor/libquasar_svm_darwin_amd64.a
+	cp target/x86_64-unknown-linux-gnu/release/libquasar_svm.a $(GO_DIR)/libquasar_svm_vendor/libquasar_svm_linux_amd64.a
+	cp target/aarch64-unknown-linux-gnu/release/libquasar_svm.a $(GO_DIR)/libquasar_svm_vendor/libquasar_svm_linux_arm64.a
+	cp target/x86_64-pc-windows-gnu/release/libquasar_svm.a $(GO_DIR)/libquasar_svm_vendor/libquasar_svm_windows_amd64.a
 	npx tsc
 	@echo "All platform binaries built and copied."
 
