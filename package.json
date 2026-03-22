@@ -38,11 +38,11 @@
     "prepublishOnly": "npm run build"
   },
   "dependencies": {
-    "@solana/accounts": "^5.5.0",
-    "@solana/addresses": "^5.5.0",
-    "@solana/codecs-core": "^5.5.0",
-    "@solana/instructions": "^5.5.0",
-    "@solana/kit": "^6.1.0",
+    "@solana/accounts": "^6.2.0",
+    "@solana/addresses": "^6.2.0",
+    "@solana/codecs-core": "^6.2.0",
+    "@solana/instructions": "^6.2.0",
+    "@solana/kit": "^6.2.0",
     "@solana/rpc-types": "^6.2.0",
     "@solana-program/system": "^0.12.0",
     "@solana-program/token": "^0.12.0",
@@ -65,11 +65,11 @@
   },
   "devDependencies": {
     "@solana/web3.js": "github:blueshift-gg/solana-web3.js#v2",
-    "@types/node": "^22.0.0",
-    "typescript": "^5.7.0",
+    "@types/node": "^22.13.0",
+    "typescript": "^5.9.0",
     "vitest": "^4.1.0"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=22.13.0"
   }
 }
