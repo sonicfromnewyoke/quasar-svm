@@ -14,11 +14,11 @@ go get github.com/blueshift-gg/quasar-svm/bindings/go
 package main
 
 import (
-	"encoding/binary"
 	"fmt"
 	"log"
 
 	"github.com/gagliardetto/solana-go"
+	"github.com/gagliardetto/solana-go/programs/token"
 	quasar "github.com/blueshift-gg/quasar-svm/bindings/go"
 )
 
@@ -44,20 +44,16 @@ func main() {
 		Mint: mintAddr, Owner: solana.NewWallet().PublicKey(), Amount: 0,
 	})
 
-	// SPL Token Transfer (opcode 3)
-	data := make([]byte, 9)
-	data[0] = 3
-	binary.LittleEndian.PutUint64(data[1:], 1_000)
+	// Transfer 1000 tokens using solana-go's SPL Token instruction builder
+	ix := token.NewTransferInstruction(
+		1_000,
+		alice.Address,
+		bob.Address,
+		authority,
+		nil, // no multisig signers
+	).Build()
 
-	result, err := svm.ProcessInstruction(quasar.Instruction{
-		ProgramID: solana.TokenProgramID,
-		Accounts: []quasar.AccountMeta{
-			{PublicKey: alice.Address, IsSigner: false, IsWritable: true},
-			{PublicKey: bob.Address, IsSigner: false, IsWritable: true},
-			{PublicKey: authority, IsSigner: true, IsWritable: false},
-		},
-		Data: data,
-	}, []quasar.Account{mint, alice, bob})
+	result, err := svm.ProcessSolanaInstruction(ix, []quasar.Account{mint, alice, bob})
 	if err != nil {
 		log.Fatal(err)
 	}

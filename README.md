@@ -171,11 +171,11 @@ with QuasarSvm() as svm:
 package main
 
 import (
-	"encoding/binary"
 	"fmt"
 	"log"
 
 	"github.com/gagliardetto/solana-go"
+	"github.com/gagliardetto/solana-go/programs/token"
 	quasar "github.com/blueshift-gg/quasar-svm/bindings/go"
 )
 
@@ -183,56 +183,38 @@ func main() {
 	svm, _ := quasar.New() // Token program loaded by default
 	defer svm.Free()
 
-	// Generate keypairs using solana-go
-	authorityKey, _ := solana.NewRandomPrivateKey()
-	authority := authorityKey.PublicKey()
+	authority := solana.NewWallet().PublicKey()
+	mintAddr := solana.NewWallet().PublicKey()
 
-	recipientKey, _ := solana.NewRandomPrivateKey()
-	recipient := recipientKey.PublicKey()
-
-	mintKey, _ := solana.NewRandomPrivateKey()
-	mintAddr := mintKey.PublicKey()
-
-	aliceAtaKey, _ := solana.NewRandomPrivateKey()
-	bobAtaKey, _ := solana.NewRandomPrivateKey()
-
-	// Create mint and token accounts
 	mint := quasar.NewMintAccount(mintAddr, quasar.MintConfig{
 		MintAuthority: &authority,
 		Decimals:      6,
 		Supply:        10_000,
 	})
-	alice := quasar.NewTokenAccount(aliceAtaKey.PublicKey(), quasar.TokenAccountConfig{
+	alice := quasar.NewTokenAccount(solana.NewWallet().PublicKey(), quasar.TokenAccountConfig{
 		Mint: mintAddr, Owner: authority, Amount: 5_000,
 	})
-	bob := quasar.NewTokenAccount(bobAtaKey.PublicKey(), quasar.TokenAccountConfig{
-		Mint: mintAddr, Owner: recipient, Amount: 0,
+	bob := quasar.NewTokenAccount(solana.NewWallet().PublicKey(), quasar.TokenAccountConfig{
+		Mint: mintAddr, Owner: solana.NewWallet().PublicKey(), Amount: 0,
 	})
 
-	// Transfer tokens (SPL Token Transfer instruction, opcode 3)
-	data := make([]byte, 9)
-	data[0] = 3 // Transfer
-	binary.LittleEndian.PutUint64(data[1:], 1_000)
+	// Transfer 1000 tokens using solana-go's SPL Token instruction builder
+	ix := token.NewTransferInstruction(
+		1_000,
+		alice.Address,
+		bob.Address,
+		authority,
+		nil,
+	).Build()
 
-	ix := quasar.Instruction{
-		ProgramID: solana.TokenProgramID,
-		Accounts: []quasar.AccountMeta{
-			{PublicKey: alice.Address, IsSigner: false, IsWritable: true},
-			{PublicKey: bob.Address, IsSigner: false, IsWritable: true},
-			{PublicKey: authority, IsSigner: true, IsWritable: false},
-		},
-		Data: data,
-	}
-
-	result, err := svm.ProcessInstruction(ix, []quasar.Account{mint, alice, bob})
+	result, err := svm.ProcessSolanaInstruction(ix, []quasar.Account{mint, alice, bob})
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	fmt.Println("Success:", result.OK())
 	fmt.Println("Compute units:", result.ComputeUnits)
-	for _, log := range result.Logs {
-		fmt.Println(log)
+	for _, l := range result.Logs {
+		fmt.Println(l)
 	}
 }
 ```
