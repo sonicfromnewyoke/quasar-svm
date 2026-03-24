@@ -1723,6 +1723,7 @@ dependencies = [
  "bincode",
  "borsh",
  "criterion",
+ "smallvec",
  "solana-account",
  "solana-bpf-loader-program",
  "solana-clock",

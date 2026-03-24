@@ -2,6 +2,67 @@ use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use quasar_svm::token::{create_keyed_associated_token_account, create_keyed_mint_account, Mint};
 use quasar_svm::{Account, AccountMeta, Instruction, Pubkey, QuasarSvm, QuasarSvmConfig, SPL_TOKEN_PROGRAM_ID};
 
+// ---------------------------------------------------------------------------
+// Counting allocator — tracks alloc/dealloc counts and total bytes allocated.
+// Relaxed ordering is sufficient: benchmarks are single-threaded, and we only
+// need approximate deltas between snapshots, not cross-thread consistency.
+// ---------------------------------------------------------------------------
+
+use std::alloc::{GlobalAlloc, Layout, System};
+use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
+
+static ALLOC_COUNT: AtomicU64 = AtomicU64::new(0);
+static DEALLOC_COUNT: AtomicU64 = AtomicU64::new(0);
+static ALLOC_BYTES: AtomicU64 = AtomicU64::new(0);
+
+struct CountingAllocator;
+
+unsafe impl GlobalAlloc for CountingAllocator {
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        ALLOC_COUNT.fetch_add(1, Relaxed);
+        ALLOC_BYTES.fetch_add(layout.size() as u64, Relaxed);
+        unsafe { System.alloc(layout) }
+    }
+
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+        DEALLOC_COUNT.fetch_add(1, Relaxed);
+        unsafe { System.dealloc(ptr, layout) }
+    }
+}
+
+#[global_allocator]
+static GLOBAL: CountingAllocator = CountingAllocator;
+
+struct AllocSnapshot {
+    allocs: u64,
+    deallocs: u64,
+    bytes: u64,
+}
+
+fn alloc_snapshot() -> AllocSnapshot {
+    AllocSnapshot {
+        allocs: ALLOC_COUNT.load(Relaxed),
+        deallocs: DEALLOC_COUNT.load(Relaxed),
+        bytes: ALLOC_BYTES.load(Relaxed),
+    }
+}
+
+fn print_alloc_stats(label: &str, before: &AllocSnapshot, after: &AllocSnapshot, iterations: u64) {
+    let allocs = after.allocs - before.allocs;
+    let deallocs = after.deallocs - before.deallocs;
+    let bytes = after.bytes - before.bytes;
+    eprintln!(
+        "  [{label}] {iterations} iterations: {allocs} allocs, {deallocs} deallocs, {} bytes ({} allocs/iter, {} bytes/iter)",
+        bytes,
+        allocs / iterations,
+        bytes / iterations,
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
 fn make_system_transfer_ix(from: &Pubkey, to: &Pubkey, lamports: u64) -> Instruction {
     let mut data = vec![2, 0, 0, 0];
     data.extend_from_slice(&lamports.to_le_bytes());
@@ -14,6 +75,10 @@ fn make_system_transfer_ix(from: &Pubkey, to: &Pubkey, lamports: u64) -> Instruc
         data,
     }
 }
+
+// ---------------------------------------------------------------------------
+// Benchmarks
+// ---------------------------------------------------------------------------
 
 fn bench_svm_new(c: &mut Criterion) {
     c.bench_function("svm_new_default", |b| {
@@ -61,6 +126,17 @@ fn bench_system_transfer(c: &mut Criterion) {
         executable: false,
     };
 
+    // Allocation profiling pass — runs before criterion to print allocs/iter stats.
+    // This also warms up the SVM (commits accounts to the store), matching steady-state.
+    let n = 1000;
+    let before = alloc_snapshot();
+    for _ in 0..n {
+        let result = svm.process_instruction(&ix, &[sender_account.clone(), recipient_account.clone()]);
+        black_box(&result);
+    }
+    let after = alloc_snapshot();
+    print_alloc_stats("system_transfer", &before, &after, n);
+
     c.bench_function("system_transfer", |b| {
         b.iter(|| {
             let result =
@@ -106,6 +182,20 @@ fn bench_spl_token_transfer(c: &mut Criterion) {
     )
     .unwrap();
 
+    // Allocation profiling pass — runs before criterion to print allocs/iter stats.
+    // This also warms up the SVM (commits accounts to the store), matching steady-state.
+    let n = 1000;
+    let before = alloc_snapshot();
+    for _ in 0..n {
+        let result = svm.process_instruction(
+            &transfer_ix,
+            &[authority_account.clone(), mint.clone(), alice.clone(), bob.clone()],
+        );
+        black_box(&result);
+    }
+    let after = alloc_snapshot();
+    print_alloc_stats("spl_token_transfer", &before, &after, n);
+
     c.bench_function("spl_token_transfer", |b| {
         b.iter(|| {
             let result = svm.process_instruction(
@@ -149,6 +239,17 @@ fn bench_simulate(c: &mut Criterion) {
         data: vec![],
         executable: false,
     };
+
+    // Allocation profiling pass — runs before criterion to print allocs/iter stats.
+    // This also warms up the SVM (commits accounts to the store), matching steady-state.
+    let n = 1000;
+    let before = alloc_snapshot();
+    for _ in 0..n {
+        let result = svm.simulate_instruction(&ix, &[sender_account.clone(), recipient_account.clone()]);
+        black_box(&result);
+    }
+    let after = alloc_snapshot();
+    print_alloc_stats("simulate_system_transfer", &before, &after, n);
 
     c.bench_function("simulate_system_transfer", |b| {
         b.iter(|| {

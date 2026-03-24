@@ -1,7 +1,9 @@
 use std::cell::RefCell;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::Arc;
+
+use smallvec::SmallVec;
 
 use agave_feature_set::FeatureSet;
 use agave_syscalls::{
@@ -12,10 +14,9 @@ use solana_account::{
 };
 use solana_compute_budget::compute_budget::ComputeBudget;
 use solana_hash::Hash;
-use solana_instruction::{AccountMeta, BorrowedAccountMeta, BorrowedInstruction, Instruction};
+use solana_instruction::{AccountMeta, Instruction};
 use solana_instruction_error::InstructionError;
-use solana_instructions_sysvar::construct_instructions_data;
-use solana_message::{LegacyMessage, Message, SanitizedMessage};
+use solana_message::SanitizedMessage;
 use solana_program_runtime::invoke_context::{EnvironmentConfig, InvokeContext};
 use solana_program_runtime::loaded_programs::ProgramRuntimeEnvironments;
 use solana_program_runtime::sysvar_cache::SysvarCache;
@@ -29,6 +30,9 @@ use solana_transaction_context::{IndexOfAccount, TransactionContext};
 use solana_program_pack::Pack;
 use spl_token::state::{Account as SplTokenAccount, Mint as SplMint};
 
+use crate::message::{
+    collect_program_ids, compile_message, maybe_build_instructions_sysvar,
+};
 use crate::program_cache::ProgramCache;
 use crate::sysvars::Sysvars;
 use crate::Account;
@@ -385,11 +389,10 @@ impl QuasarSvm {
     /// Merge explicit accounts with the stored account database.
     /// Explicit accounts take priority over stored ones.
     fn merge_accounts(&self, accounts: &[(Pubkey, SolanaAccount)]) -> Vec<(Pubkey, SolanaAccount)> {
-        let explicit: HashSet<Pubkey> = accounts.iter().map(|(k, _)| *k).collect();
         let mut merged: Vec<(Pubkey, SolanaAccount)> = self
             .accounts
             .iter()
-            .filter(|(k, _)| !explicit.contains(k))
+            .filter(|(k, _)| !accounts.iter().any(|(ek, _)| ek == *k))
             .map(|(k, v)| (*k, v.clone()))
             .collect();
         merged.extend_from_slice(accounts);
@@ -414,112 +417,109 @@ impl QuasarSvm {
             .unwrap_or_default()
     }
 
-    /// Build the instructions sysvar account.
-    fn build_instructions_sysvar(instructions: &[Instruction]) -> (Pubkey, SolanaAccount) {
-        let data = construct_instructions_data(
-            instructions
-                .iter()
-                .map(|ix| BorrowedInstruction {
-                    program_id: &ix.program_id,
-                    accounts: ix
-                        .accounts
-                        .iter()
-                        .map(|meta| BorrowedAccountMeta {
-                            pubkey: &meta.pubkey,
-                            is_signer: meta.is_signer,
-                            is_writable: meta.is_writable,
-                        })
-                        .collect(),
-                    data: &ix.data,
-                })
-                .collect::<Vec<_>>()
-                .as_slice(),
-        );
-        (
-            solana_instructions_sysvar::ID,
-            SolanaAccount {
-                lamports: 0,
-                data,
-                owner: solana_sysvar_id::ID,
-                executable: false,
-                rent_epoch: 0,
-            },
-        )
-    }
-
     /// Compile accounts into the format needed by TransactionContext.
     fn compile_accounts(
         &self,
         instructions: &[Instruction],
         accounts: &[(Pubkey, SolanaAccount)],
     ) -> (SanitizedMessage, Vec<(Pubkey, AccountSharedData)>) {
-        let message = Message::new(instructions, None);
-        let sanitized_message =
-            SanitizedMessage::Legacy(LegacyMessage::new(message, &HashSet::new()));
+        let sanitized_message = compile_message(instructions);
 
-        let program_ids: HashSet<Pubkey> = instructions.iter().map(|ix| ix.program_id).collect();
-        let account_keys: HashSet<&Pubkey> = accounts.iter().map(|(k, _)| k).collect();
+        let fallbacks = self.build_fallback_accounts(instructions, accounts);
 
-        // Build fallback accounts for programs and sysvars not in the provided list.
-        let mut fallbacks = HashMap::new();
+        let instructions_sysvar = maybe_build_instructions_sysvar(instructions, accounts);
+
+        let transaction_accounts = self.resolve_transaction_accounts(
+            &sanitized_message,
+            accounts,
+            &fallbacks,
+            &instructions_sysvar,
+        );
+
+        (sanitized_message, transaction_accounts)
+    }
+
+    /// Build fallback `AccountSharedData` entries for programs not in the provided accounts.
+    fn build_fallback_accounts(
+        &self,
+        instructions: &[Instruction],
+        accounts: &[(Pubkey, SolanaAccount)],
+    ) -> SmallVec<[(Pubkey, AccountSharedData); 8]> {
+        let mut fallbacks: SmallVec<[(Pubkey, AccountSharedData); 8]> = SmallVec::new();
+        let program_ids = collect_program_ids(instructions);
 
         for pid in &program_ids {
-            if !account_keys.contains(pid) {
-                let program_accounts = self.program_cache.maybe_create_program_accounts(pid);
-                if program_accounts.is_empty() {
-                    let mut stub = SolanaAccount::default();
-                    stub.set_executable(true);
-                    fallbacks.insert(*pid, stub);
-                } else {
-                    for (key, acct) in program_accounts {
-                        fallbacks.insert(key, acct);
-                    }
+            if accounts.iter().any(|(k, _)| k == pid) {
+                continue;
+            }
+            let program_accounts = self.program_cache.maybe_create_program_accounts(pid);
+            if program_accounts.is_empty() {
+                let mut stub = SolanaAccount::default();
+                stub.set_executable(true);
+                fallbacks.push((*pid, AccountSharedData::from(stub)));
+            } else {
+                for (key, acct) in program_accounts {
+                    fallbacks.push((key, AccountSharedData::from(acct)));
                 }
             }
         }
 
-        // Instructions sysvar - always build it.
-        let instructions_sysvar = if !account_keys.contains(&solana_instructions_sysvar::ID) {
-            let (id, acct) = Self::build_instructions_sysvar(instructions);
-            fallbacks.insert(id, acct.clone());
-            Some((id, acct))
-        } else {
-            None
-        };
+        fallbacks
+    }
 
-        let mut transaction_accounts: Vec<(Pubkey, AccountSharedData)> = sanitized_message
-            .account_keys()
-            .iter()
-            .map(|key| {
-                // Try provided accounts first.
-                if let Some((_, a)) = accounts.iter().find(|(k, _)| k == key) {
-                    return (*key, AccountSharedData::from(a.clone()));
-                }
-                // Then try fallbacks (already built for top-level program IDs).
-                if let Some(a) = fallbacks.get(key) {
-                    return (*key, AccountSharedData::from(a.clone()));
-                }
-                // Sysvar fallback.
-                if let Some(a) = self.sysvars.maybe_create_sysvar_account(key) {
-                    return (*key, AccountSharedData::from(a));
-                }
-                // Program account fallback (for CPI targets not in top-level instructions).
-                let program_accounts = self.program_cache.maybe_create_program_accounts(key);
-                if let Some((_, a)) = program_accounts.into_iter().find(|(k, _)| k == key) {
-                    return (*key, AccountSharedData::from(a));
-                }
-                // Empty account as last resort.
-                (*key, AccountSharedData::default())
-            })
-            .collect();
+    /// Map each account key in the message to its `AccountSharedData`,
+    /// checking provided accounts, fallbacks, sysvars, and program cache in order.
+    fn resolve_transaction_accounts(
+        &self,
+        sanitized_message: &SanitizedMessage,
+        accounts: &[(Pubkey, SolanaAccount)],
+        fallbacks: &[(Pubkey, AccountSharedData)],
+        instructions_sysvar: &Option<(Pubkey, AccountSharedData)>,
+    ) -> Vec<(Pubkey, AccountSharedData)> {
+        let msg_keys = sanitized_message.account_keys();
+        let mut transaction_accounts: Vec<(Pubkey, AccountSharedData)> =
+            Vec::with_capacity(msg_keys.len() + 1);
 
-        // Always append the instructions sysvar if it wasn't in the message's account keys.
-        // This ensures programs can always introspect the current transaction's instructions.
-        if let Some((id, acct)) = instructions_sysvar {
-            transaction_accounts.push((id, AccountSharedData::from(acct)));
+        for key in msg_keys.iter() {
+            let resolved = accounts
+                .iter()
+                .find(|(k, _)| k == key)
+                .map(|(_, a)| AccountSharedData::from(a.clone()))
+                .or_else(|| {
+                    fallbacks
+                        .iter()
+                        .find(|(k, _)| k == key)
+                        .map(|(_, a)| a.clone())
+                })
+                .or_else(|| {
+                    instructions_sysvar
+                        .as_ref()
+                        .filter(|(k, _)| k == key)
+                        .map(|(_, a)| a.clone())
+                })
+                .or_else(|| {
+                    self.sysvars
+                        .maybe_create_sysvar_account(key)
+                        .map(AccountSharedData::from)
+                })
+                .or_else(|| {
+                    self.program_cache
+                        .maybe_create_program_accounts(key)
+                        .into_iter()
+                        .find(|(k, _)| k == key)
+                        .map(|(_, a)| AccountSharedData::from(a))
+                })
+                .unwrap_or_default();
+            transaction_accounts.push((*key, resolved));
         }
 
-        (sanitized_message, transaction_accounts)
+        if let Some((id, shared)) = instructions_sysvar {
+            if !msg_keys.iter().any(|k| k == id) {
+                transaction_accounts.push((*id, shared.clone()));
+            }
+        }
+
+        transaction_accounts
     }
 
     fn deconstruct_resulting_accounts(
