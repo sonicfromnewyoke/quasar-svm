@@ -13,8 +13,13 @@ fn main() {
         .expect("Unable to generate C bindings");
 
     bindings.write_to_file(format!("{}/../include/quasar_svm.h", crate_dir));
-    bindings.write_to_file(format!(
+
+    let go_header_path = format!(
         "{}/../bindings/go/libquasar_svm_vendor/quasar_svm.h",
         crate_dir
-    ));
+    );
+    if let Some(dir) = std::path::Path::new(&go_header_path).parent() {
+        std::fs::create_dir_all(dir).expect("Unable to create Go vendor header directory");
+    }
+    bindings.write_to_file(go_header_path);
 }
