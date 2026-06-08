@@ -1,6 +1,7 @@
 /.vscode
 /target
 /dist
+/.vscode
 /docs/node_modules
 /node_modules
 bindings/java
@@ -25,6 +26,8 @@ bindings/python/*/__pycache__
 # Node.js bindings (dev symlinks)
 bindings/node/libquasar_svm.*
 bindings/node/quasar_svm.dll
+# README example typecheck artifacts
+tests/.readme-example-typecheck/
 
 # Golang
 bindings/go/go.sum

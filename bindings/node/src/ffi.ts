@@ -1,5 +1,10 @@
 import koffi from "koffi";
 import path from "path";
+import { fileURLToPath } from "url";
+import { createRequire } from "module";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const require = createRequire(import.meta.url);
 
 const PLATFORMS: Record<string, { pkg: string; lib: string; rootLib: string }> = {
   "darwin-arm64": { pkg: "@blueshift-gg/quasar-svm-darwin-arm64",   lib: "libquasar_svm.dylib", rootLib: "libquasar_svm.dylib" },
@@ -30,7 +35,22 @@ function getLibraryPath(): string {
   try { require("fs").accessSync(rootBin); return rootBin; } catch {}
 
   // 3. Local dev build
-  return path.join(pkgRoot, "target", "release", triple.lib);
+  const devBin = path.join(pkgRoot, "target", "release", triple.lib);
+  try {
+    require("fs").accessSync(devBin);
+    return devBin;
+  } catch {
+    throw new Error(
+      `Failed to locate quasar-svm native library. Tried:\n` +
+      `  1. Platform package: ${triple.pkg}\n` +
+      `  2. Package root: ${rootBin}\n` +
+      `  3. Dev build: ${devBin}\n\n` +
+      `Solutions:\n` +
+      `  - Ensure optional dependencies are installed: npm install\n` +
+      `  - Build locally: npm run build:native\n` +
+      `  - Set QUASAR_SVM_LIB environment variable to the library path`
+    );
+  }
 }
 
 const lib = koffi.load(getLibraryPath());

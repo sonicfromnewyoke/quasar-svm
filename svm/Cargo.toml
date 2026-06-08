@@ -59,5 +59,12 @@ borsh = { version = "1", optional = true }
 spl-token = { version = "9.0.0", default-features = false, features = ["no-entrypoint"] }
 solana-program-pack = "3.1"
 
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+
 [features]
 borsh = ["dep:borsh"]
+
+[[bench]]
+name = "svm_bench"
+harness = false

@@ -5,7 +5,7 @@ use std::slice;
 use crate::error::*;
 use crate::wire;
 use quasar_svm::loader_keys;
-use quasar_svm::{QuasarSvm, Account};
+use quasar_svm::{Account, QuasarSvm};
 
 // ---------------------------------------------------------------------------
 // Error query
@@ -120,10 +120,7 @@ pub extern "C" fn quasar_svm_warp_to_slot(svm: *mut QuasarSvm, slot: u64) -> i32
 
 #[allow(deprecated)]
 #[unsafe(no_mangle)]
-pub extern "C" fn quasar_svm_set_rent(
-    svm: *mut QuasarSvm,
-    lamports_per_byte_year: u64
-) -> i32 {
+pub extern "C" fn quasar_svm_set_rent(svm: *mut QuasarSvm, lamports_per_byte_year: u64) -> i32 {
     clear_last_error();
     if svm.is_null() {
         set_last_error("Null pointer argument");

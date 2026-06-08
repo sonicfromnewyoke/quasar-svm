@@ -398,4 +398,3 @@ pub fn serialize_result(result: &ExecutionResult) -> Box<[u8]> {
 
     w.into_boxed_slice()
 }
-

@@ -1,5 +1,6 @@
 import path from "path";
 import fs from "fs";
+import { fileURLToPath } from "url";
 
 // Program IDs
 export const SPL_TOKEN_PROGRAM_ID = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
@@ -13,6 +14,7 @@ export const LOADER_V3 = 3;
 
 export const LAMPORTS_PER_SOL = 1_000_000_000n;
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const programsDir = path.resolve(__dirname, "..", "programs");
 
 export function loadElf(name: string): Uint8Array {
